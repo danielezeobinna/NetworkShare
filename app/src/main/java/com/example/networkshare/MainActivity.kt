@@ -10,8 +10,8 @@ import android.os.Environment
 import android.provider.Settings
 import android.util.Log
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent // Added missing import
-import androidx.activity.compose.rememberLauncherForActivityResult // Added missing import
+import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
@@ -29,16 +29,10 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import com.example.networkshare.ui.theme.NetworkShareTheme
 
-/**
- * Checks if the MANAGE_EXTERNAL_STORAGE permission is granted.
- * This check is only relevant for Android 11 (API 30) and above.
- */
 fun isManageAllFilesPermissionGranted(context: Context): Boolean {
-    // MANAGE_EXTERNAL_STORAGE check is only valid on Android 11 (R) and higher
     return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
         Environment.isExternalStorageManager()
     } else {
-        // Fallback check for older APIs (API 29 and below)
         ContextCompat.checkSelfPermission(
             context,
             android.Manifest.permission.WRITE_EXTERNAL_STORAGE
@@ -53,7 +47,6 @@ class MainActivity : ComponentActivity() {
         setContent {
             NetworkShareTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    // The main UI is now a composable that handles permission checks
                     PermissionCheckScreen(modifier = Modifier.padding(innerPadding))
                 }
             }
@@ -65,37 +58,29 @@ class MainActivity : ComponentActivity() {
 fun PermissionCheckScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     
-    // State to hold the current permission status
     var isGranted by remember { 
         mutableStateOf(isManageAllFilesPermissionGranted(context)) 
     }
     
-    // Use DisposableEffect to re-check permission status when the activity resumes (e.g., after returning from Settings)
     DisposableEffect(Unit) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                // Update the state variable when the app resumes
                 isGranted = isManageAllFilesPermissionGranted(context)
                 if (isGranted) {
                     Log.d("FileShareApp", "MANAGE_EXTERNAL_STORAGE granted on resume.")
                 }
             }
         }
-        // Attach the observer to the activity's lifecycle
         (context as? LifecycleOwner)?.lifecycle?.addObserver(observer)
         
-        // Cleanup: remove the observer when the composable is removed from the screen
         onDispose {
             (context as? LifecycleOwner)?.lifecycle?.removeObserver(observer)
         }
     }
     
-    // 2. Define the ActivityResultLauncher using Compose's API
     val storageSettingsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) {
-        // This callback runs immediately after the user returns from settings (before onResume). 
-        // The DisposableEffect onResume check will confirm the final status.
     }
     
     Column(
@@ -129,7 +114,7 @@ fun PermissionCheckScreen(modifier: Modifier = Modifier) {
                     Spacer(Modifier.height(32.dp))
                     
                     Button(
-                        onClick = { /* TODO: Start your network file server here */ },
+                        onClick = {},
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                     ) {
                         Text("Start File Server")
@@ -150,7 +135,6 @@ fun PermissionCheckScreen(modifier: Modifier = Modifier) {
                     Spacer(Modifier.height(32.dp))
                     
                     Button(onClick = { 
-                        // Launch the Intent to request the permission
                         requestManageAllFilesPermission(context, storageSettingsLauncher)
                     }) {
                         Text("Grant All Files Access in Settings")
@@ -161,23 +145,17 @@ fun PermissionCheckScreen(modifier: Modifier = Modifier) {
     }
 }
 
-/**
- * Launches the Intent to prompt the user to grant "All Files Access".
- * This redirects the user to the specific Android Settings page for the app.
- */
 fun requestManageAllFilesPermission(
     context: Context,
     launcher: ActivityResultLauncher<Intent>
 ) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
         try {
-            // Intent action to go directly to the app's 'Manage all files' setting
             val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
             intent.data = Uri.parse("package:" + context.packageName)
             launcher.launch(intent)
 
         } catch (e: Exception) {
-            // Fallback: If the specific Intent fails, launch the general management screen
             val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
             launcher.launch(intent)
             Log.e("FileShareApp", "Failed to launch specific settings page: ${e.message}")
