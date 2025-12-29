@@ -49,7 +49,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         
-        // Start permission check
         initPermissions()
 
         setContent {
@@ -64,7 +63,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // Call this specifically after permissions are granted
     private fun checkAndStartServer() {
         if (server == null) {
             val port = 8080
@@ -98,9 +96,7 @@ class MainActivity : ComponentActivity() {
                 val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
                     data = "package:${applicationContext.packageName}".toUri()
                 }
-                startActivity(intent)
-                // Note: User has to come back to the app manually. 
-                // You might want to call checkAndStartServer() in onResume() 
+                startActivity(intent) 
             } else {
                 checkAndStartServer()
             }
@@ -114,7 +110,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Re-check if user granted permission in settings
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             if (Environment.isExternalStorageManager()) {
                 checkAndStartServer()
