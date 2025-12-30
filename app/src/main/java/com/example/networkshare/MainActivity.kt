@@ -11,35 +11,30 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.net.toUri
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.net.toUri
 import com.example.networkshare.ui.theme.NetworkShareTheme
+import java.io.File
 import java.net.Inet4Address
 import java.net.NetworkInterface
 
 class MainActivity : ComponentActivity() {
 
-    private var server: WebDAVServer? = null
-    private var serverAddress by mutableStateOf("Waiting for permissions...")
+    private val activeServers = mutableListOf<WebDAVServer>()
+    
+    private var serverAddresses by mutableStateOf("Scanning for storage...")
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { isGranted ->
         if (isGranted.values.all { it }) {
-            checkAndStartServer()
+            checkAndStartServers()
         } else {
             Toast.makeText(this, "Permissions denied", Toast.LENGTH_SHORT).show()
         }
@@ -48,46 +43,18 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        
         initPermissions()
 
         setContent {
             NetworkShareTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     ServerStatusScreen(
-                        address = serverAddress,
+                        addresses = serverAddresses,
                         modifier = Modifier.padding(innerPadding)
                     )
                 }
             }
         }
-    }
-
-    private fun checkAndStartServer() {
-        if (server == null) {
-            val port = 8080
-            server = WebDAVServer(port = port)
-            
-            val ip = getLocalIpAddress() ?: "Unknown IP"
-            serverAddress = "http://$ip:$port/"
-        }
-    }
-
-    private fun getLocalIpAddress(): String? {
-        try {
-            val interfaces = NetworkInterface.getNetworkInterfaces()
-            for (intf in interfaces) {
-                val addrs = intf.inetAddresses
-                for (addr in addrs) {
-                    if (!addr.isLoopbackAddress && addr is Inet4Address) {
-                        return addr.hostAddress
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-        return null
     }
 
     private fun initPermissions() {
@@ -96,9 +63,9 @@ class MainActivity : ComponentActivity() {
                 val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
                     data = "package:${applicationContext.packageName}".toUri()
                 }
-                startActivity(intent) 
+                startActivity(intent)
             } else {
-                checkAndStartServer()
+                checkAndStartServers()
             }
         } else {
             requestPermissionLauncher.launch(arrayOf(
@@ -108,37 +75,95 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun checkAndStartServers() {
+        if (activeServers.isNotEmpty()) return
+
+        val ip = getLocalIpAddress() ?: "127.0.0.1"
+        val displayInfo = StringBuilder()
+
+        val internalRoot = Environment.getExternalStorageDirectory()
+        activeServers.add(WebDAVServer(8080, internalRoot))
+        displayInfo.append("Internal Storage:\nhttp://$ip:8080/\n\n")
+
+        val externalDirs = getExternalFilesDirs(null)
+        var nextPort = 8081
+
+        externalDirs?.forEach { dir ->
+            if (dir != null) {
+                val path = dir.absolutePath
+                if (path.contains("/storage/") && !path.contains("/emulated/")) {
+                
+                    val storagePath = path.split("/Android/")[0]
+                    val sdRoot = File(storagePath)
+
+                    if (sdRoot.exists() && sdRoot.canRead()) {
+                        try {
+                            activeServers.add(WebDAVServer(nextPort, sdRoot))
+                            displayInfo.append("SD Card (${sdRoot.name}):\nhttp://$ip:$nextPort/\n\n")
+                            nextPort++
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
+        }
+
+        serverAddresses = if (activeServers.size <= 1 && displayInfo.length < 30) {
+            displayInfo.append("No SD Card detected.").toString()
+        } else {
+            displayInfo.toString().trim()
+        }
+    }
+
+    private fun getLocalIpAddress(): String? {
+        return try {
+            NetworkInterface.getNetworkInterfaces().toList()
+                .flatMap { it.inetAddresses.toList() }
+                .filterIsInstance<Inet4Address>()
+                .firstOrNull { !it.isLoopbackAddress }
+                ?.hostAddress
+        } catch (_: Exception) { null }
+    }
+
     override fun onResume() {
         super.onResume()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            if (Environment.isExternalStorageManager()) {
-                checkAndStartServer()
-            }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()) {
+            checkAndStartServers()
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        server?.stopServer()
-        server = null
+        activeServers.forEach { it.stopServer() }
+        activeServers.clear()
     }
 }
 
 @Composable
-fun ServerStatusScreen(address: String, modifier: Modifier = Modifier) {
+fun ServerStatusScreen(addresses: String, modifier: Modifier = Modifier) {
     Column(modifier = modifier.padding(24.dp)) {
         Text(
-            text = "WebDAV Server Status", 
+            text = "Network Share Active",
             style = MaterialTheme.typography.headlineMedium,
+            color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(bottom = 16.dp)
         )
-        Text(text = "Connect to this address on your PC:", fontSize = 14.sp)
         Text(
-            text = address, 
-            fontWeight = FontWeight.Bold, 
-            fontSize = 20.sp,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(top = 8.dp)
+            text = "Enter these addresses in your PC File Explorer:",
+            fontSize = 14.sp,
+            modifier = Modifier.padding(bottom = 8.dp)
         )
+        Surface(
+            tonalElevation = 4.dp,
+            shape = MaterialTheme.shapes.medium,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                text = addresses,
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp,
+                lineHeight = 24.sp,
+                modifier = Modifier.padding(16.dp)
+            )
+        }
     }
 }
