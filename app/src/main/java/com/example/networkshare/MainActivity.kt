@@ -19,25 +19,26 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
-import com.example.networkshare.ui.theme.NetworkShareTheme
-import java.io.File
 import java.net.Inet4Address
 import java.net.NetworkInterface
 
 class MainActivity : ComponentActivity() {
 
-    private val activeServers = mutableListOf<WebDAVServer>()
-    
-    private var serverAddresses by mutableStateOf("Scanning for storage...")
+    private var serverAddresses by mutableStateOf("Service is off")
+    private var isDiscoveryOn by mutableStateOf(false)
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { isGranted ->
-        if (isGranted.values.all { it }) {
-            checkAndStartServers()
-        } else {
+        if (!isGranted.values.all { it }) {
             Toast.makeText(this, "Permissions denied", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) toggleService(true)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -46,72 +47,45 @@ class MainActivity : ComponentActivity() {
         initPermissions()
 
         setContent {
-            NetworkShareTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    ServerStatusScreen(
-                        addresses = serverAddresses,
-                        modifier = Modifier.padding(innerPadding)
-                    )
-                }
-            }
-        }
-    }
-
-    private fun initPermissions() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            if (!Environment.isExternalStorageManager()) {
-                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
-                    data = "package:${applicationContext.packageName}".toUri()
-                }
-                startActivity(intent)
-            } else {
-                checkAndStartServers()
-            }
-        } else {
-            requestPermissionLauncher.launch(arrayOf(
-                Manifest.permission.READ_EXTERNAL_STORAGE,
-                Manifest.permission.WRITE_EXTERNAL_STORAGE
-            ))
-        }
-    }
-
-    private fun checkAndStartServers() {
-        if (activeServers.isNotEmpty()) return
-
-        val ip = getLocalIpAddress() ?: "127.0.0.1"
-        val displayInfo = StringBuilder()
-
-        val internalRoot = Environment.getExternalStorageDirectory()
-        activeServers.add(WebDAVServer(8080, internalRoot))
-        displayInfo.append("Internal Storage:\nhttp://$ip:8080/\n\n")
-
-        val externalDirs = getExternalFilesDirs(null)
-        var nextPort = 8081
-
-        externalDirs?.forEach { dir ->
-            if (dir != null) {
-                val path = dir.absolutePath
-                if (path.contains("/storage/") && !path.contains("/emulated/")) {
-                
-                    val storagePath = path.split("/Android/")[0]
-                    val sdRoot = File(storagePath)
-
-                    if (sdRoot.exists() && sdRoot.canRead()) {
-                        try {
-                            activeServers.add(WebDAVServer(nextPort, sdRoot))
-                            displayInfo.append("SD Card (${sdRoot.name}):\nhttp://$ip:$nextPort/\n\n")
-                            nextPort++
-                        } catch (_: Exception) {}
+            MaterialTheme {
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                        DiscoveryScreen(
+                            isOn = isDiscoveryOn,
+                            addresses = serverAddresses,
+                            onToggle = { start -> handleToggle(start) },
+                            modifier = Modifier.padding(innerPadding)
+                        )
                     }
                 }
             }
         }
+    }
 
-        serverAddresses = if (activeServers.size <= 1 && displayInfo.length < 30) {
-            displayInfo.append("No SD Card detected.").toString()
+    private fun handleToggle(start: Boolean) {
+        if (start && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {
-            displayInfo.toString().trim()
+            toggleService(start)
         }
+    }
+
+    private fun toggleService(start: Boolean) {
+        val intent = Intent(this, WebDAVService::class.java)
+        if (start) {
+            startForegroundService(intent)
+            isDiscoveryOn = true
+            updateAddresses()
+        } else {
+            stopService(intent)
+            isDiscoveryOn = false
+            serverAddresses = "Service is off"
+        }
+    }
+
+    private fun updateAddresses() {
+        val ip = getLocalIpAddress() ?: "127.0.0.1"
+        serverAddresses = "Internal: http://$ip:8080/\nSD Card: http://$ip:8081/\n(Check notification for status)"
     }
 
     private fun getLocalIpAddress(): String? {
@@ -124,46 +98,87 @@ class MainActivity : ComponentActivity() {
         } catch (_: Exception) { null }
     }
 
-    override fun onResume() {
-        super.onResume()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager()) {
-            checkAndStartServers()
+    private fun initPermissions() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (!Environment.isExternalStorageManager()) {
+                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+
+                    data = "package:${applicationContext.packageName}".toUri()
+                }
+                startActivity(intent)
+            }
+        } else {
+            requestPermissionLauncher.launch(arrayOf(
+                Manifest.permission.READ_EXTERNAL_STORAGE,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            ))
         }
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-        activeServers.forEach { it.stopServer() }
-        activeServers.clear()
+    override fun onResume() {
+        super.onResume()
+        if (isDiscoveryOn) {
+            updateAddresses()
+        }
     }
 }
 
 @Composable
-fun ServerStatusScreen(addresses: String, modifier: Modifier = Modifier) {
+fun DiscoveryScreen(
+    isOn: Boolean,
+    addresses: String,
+    onToggle: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
     Column(modifier = modifier.padding(24.dp)) {
-        Text(
-            text = "Network Share Active",
-            style = MaterialTheme.typography.headlineMedium,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(bottom = 16.dp)
-        )
-        Text(
-            text = "Enter these addresses in your PC File Explorer:",
-            fontSize = 14.sp,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
-        Surface(
-            tonalElevation = 4.dp,
-            shape = MaterialTheme.shapes.medium,
-            modifier = Modifier.fillMaxWidth()
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
         ) {
-            Text(
-                text = addresses,
-                fontWeight = FontWeight.Bold,
-                fontSize = 16.sp,
-                lineHeight = 24.sp,
-                modifier = Modifier.padding(16.dp)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Network discovery",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = "Your phone can be accessed by your PC on the network",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 18.sp
+                )
+            }
+
+            Switch(
+                checked = isOn,
+                onCheckedChange = { onToggle(it) }
             )
+        }
+
+        if (isOn) {
+            Spacer(modifier = Modifier.height(32.dp))
+            Text(
+                text = "PC Connection Addresses:",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+            Surface(
+                tonalElevation = 8.dp,
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.surfaceVariant
+            ) {
+                Text(
+                    text = addresses,
+                    modifier = Modifier.padding(16.dp),
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    fontSize = 14.sp
+                )
+            }
         }
     }
 }
