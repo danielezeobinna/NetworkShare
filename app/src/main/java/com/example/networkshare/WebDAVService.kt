@@ -2,7 +2,6 @@ package com.example.networkshare
 
 import android.app.*
 import android.content.Intent
-import android.os.Build
 import android.os.Environment
 import android.os.IBinder
 import android.util.Log
@@ -14,11 +13,10 @@ import java.net.NetworkInterface
 class WebDAVService : Service() {
 
     private val activeServers = mutableListOf<WebDAVServer>()
-    private val channelId = "WebDAV_Service_Channel" // Fixed naming convention
+    private val channelId = "WebDAV_Service_Channel"
     private val tag = "WebDAVService"
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Handle the STOP action from the notification button
         if (intent?.action == "STOP_SERVICE") {
             stopSelf()
             return START_NOT_STICKY
@@ -26,7 +24,6 @@ class WebDAVService : Service() {
 
         createNotificationChannel()
 
-        // Setup the STOP button for the notification
         val stopIntent = Intent(this, WebDAVService::class.java).apply {
             action = "STOP_SERVICE"
         }
@@ -47,10 +44,8 @@ class WebDAVService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
 
-        // Start in foreground
         startForeground(1, notification)
 
-        // Start the server logic
         startWebDAVServers()
 
         return START_STICKY
@@ -62,14 +57,12 @@ class WebDAVService : Service() {
         val ip = getLocalIpAddress() ?: "127.0.0.1"
         Log.d(tag, "Starting servers on IP: $ip")
 
-        // 1. Internal Storage
         try {
             activeServers.add(WebDAVServer(8080, Environment.getExternalStorageDirectory()))
         } catch (e: Exception) {
             Log.e(tag, "Failed to start internal server: ${e.message}")
         }
 
-        // 2. SD Card Logic
         val externalDirs = getExternalFilesDirs(null)
         var nextPort = 8081
         externalDirs?.forEach { dir: File? ->
@@ -105,20 +98,19 @@ class WebDAVService : Service() {
         Log.d(tag, "Service stopping, cleaning up servers...")
         activeServers.forEach { it.stopServer() }
         activeServers.clear()
+        sendBroadcast(Intent("com.example.networkshare.SERVER_STOPPED"))
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                channelId,
-                "Network Discovery",
-                NotificationManager.IMPORTANCE_LOW
-            )
-            val manager = getSystemService(NotificationManager::class.java)
-            manager?.createNotificationChannel(channel)
-        }
+        val channel = NotificationChannel(
+            channelId,
+            "Network Discovery",
+            NotificationManager.IMPORTANCE_LOW
+        )
+        val manager = getSystemService(NotificationManager::class.java)
+        manager?.createNotificationChannel(channel)
     }
 }
