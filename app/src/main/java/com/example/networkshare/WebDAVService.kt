@@ -25,6 +25,17 @@ class WebDAVService : Service() {
 
         createNotificationChannel()
 
+        val contentIntent = Intent(this, MainActivity::class.java).apply {
+            setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        }
+
+        val contentPendingIntent = PendingIntent.getActivity(
+            this,
+            1,
+            contentIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
         val stopIntent = Intent(this, WebDAVService::class.java).apply {
             action = "STOP_SERVICE"
         }
@@ -42,6 +53,7 @@ class WebDAVService : Service() {
             .setContentText("Your phone can be accessed by your PC")
             .setOngoing(true)
             .setColor("#5BACD6".toColorInt())
+            .setContentIntent(contentPendingIntent)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "TURN OFF", stopPendingIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
