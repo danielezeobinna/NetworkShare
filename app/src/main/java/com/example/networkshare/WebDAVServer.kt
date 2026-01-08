@@ -1,5 +1,6 @@
 package com.example.networkshare
 
+import android.content.Context
 import android.util.Log
 import fi.iki.elonen.NanoHTTPD
 import java.io.File
@@ -10,7 +11,8 @@ import java.util.*
 
 class WebDAVServer(
     port: Int,
-    private val rootDirectory: File
+    private val rootDirectory: File,
+    private val context: Context
 ) : NanoHTTPD(port) {
 
     private val tag = "WebDAVServer:$port"
@@ -41,11 +43,10 @@ class WebDAVServer(
             Method.LOCK -> serveLock(uri)
             Method.UNLOCK -> newFixedLengthResponse(Response.Status.NO_CONTENT, MIME_PLAINTEXT, "")
             Method.HEAD -> if (targetFile.exists()) newFixedLengthResponse(Response.Status.OK, null, "") else serveNotFound()
-        
             else -> newFixedLengthResponse(Response.Status.METHOD_NOT_ALLOWED, MIME_PLAINTEXT, "Not Supported")
         }
     }
-    
+
     private fun handleMkcol(target: File): Response {
         return try {
             if (target.exists()) {
@@ -63,12 +64,10 @@ class WebDAVServer(
     private fun handlePut(session: IHTTPSession, target: File): Response {
         return try {
             target.parentFile?.mkdirs()
-        
             val inputStream = session.inputStream
             val contentLength = session.headers["content-length"]?.toLong() ?: 0L
-        
             target.outputStream().use { output ->
-                val buffer = ByteArray(65536) // 64KB buffer
+                val buffer = ByteArray(65536)
                 var totalRead = 0L
                 while (totalRead < contentLength) {
                     val read = inputStream.read(buffer)
@@ -100,25 +99,37 @@ class WebDAVServer(
 
     private fun handleMove(session: IHTTPSession, target: File): Response {
         val destinationHeader = session.headers["destination"] ?: return serveNotFound()
-        val destPath = java.net.URL(destinationHeader).path
-        val destFile = File(rootDirectory, destPath.trimStart('/'))
-    
-        return if (target.renameTo(destFile)) {
-            newFixedLengthResponse(Response.Status.CREATED, MIME_PLAINTEXT, "Moved")
-        } else {
-            newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Move Failed")
+        return try {
+            val decodedPath = java.net.URLDecoder.decode(java.net.URL(destinationHeader).path, "UTF-8")
+            val destFile = File(rootDirectory, decodedPath.trimStart('/'))
+            destFile.parentFile?.mkdirs()
+            if (target.renameTo(destFile)) {
+                newFixedLengthResponse(Response.Status.CREATED, MIME_PLAINTEXT, "Moved")
+            } else {
+                newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Move Failed")
+            }
+        } catch (e: Exception) {
+            newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, e.message)
         }
     }
+
     private fun handleDelete(target: File): Response {
+        val path = target.absolutePath
+        if (target.isFile) {
+            if (!PersistenceGuard.isSafeToDelete(context, path)) {
+                return newFixedLengthResponse(Response.Status.FORBIDDEN, MIME_PLAINTEXT, "Safety Lock Active")
+            }
+        }
         return if (target.deleteRecursively()) {
+            PersistenceGuard.clear(context, path)
             newFixedLengthResponse(Response.Status.NO_CONTENT, MIME_PLAINTEXT, "")
         } else {
             newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Delete failed")
         }
     }
 
-private fun serveNotFound() = newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not Found")
-    
+    private fun serveNotFound() = newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not Found")
+
     private fun serveLock(uri: String): Response {
         val token = "uuid:${UUID.randomUUID()}"
         val xml = """<?xml version="1.0" encoding="utf-8" ?>
@@ -135,7 +146,6 @@ private fun serveNotFound() = newFixedLengthResponse(Response.Status.NOT_FOUND, 
                     </D:activelock>
                 </D:lockdiscovery>
             </D:prop>""".trimIndent()
-
         val res = newFixedLengthResponse(Response.Status.OK, "application/xml; charset=utf-8", xml)
         res.addHeader("Lock-Token", "<$token>")
         return res
@@ -154,7 +164,22 @@ private fun serveNotFound() = newFixedLengthResponse(Response.Status.NOT_FOUND, 
             if (target.isDirectory) {
                 newFixedLengthResponse(Response.Status.FORBIDDEN, MIME_PLAINTEXT, "Directory GET forbidden")
             } else {
-                newFixedLengthResponse(Response.Status.OK, "application/octet-stream", FileInputStream(target), target.length())
+                val path = target.absolutePath
+                PersistenceGuard.markStarted(context, path)
+                val fileStream = object : FileInputStream(target) {
+                    var totalBytesRead = 0L
+                    override fun read(b: ByteArray, off: Int, len: Int): Int {
+                        val bytesRead = super.read(b, off, len)
+                        if (bytesRead != -1) {
+                            totalBytesRead += bytesRead
+                        }
+                        if (totalBytesRead >= target.length()) {
+                            PersistenceGuard.markVerified(context, path)
+                        }
+                        return bytesRead
+                    }
+                }
+                newFixedLengthResponse(Response.Status.OK, "application/octet-stream", fileStream, target.length())
             }
         } catch (_: Exception) {
             newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Read Error")

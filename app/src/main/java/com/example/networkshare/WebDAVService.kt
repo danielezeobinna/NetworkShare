@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.Environment
 import android.os.IBinder
 import android.util.Log
+import androidx.core.graphics.toColorInt
 import androidx.core.app.NotificationCompat
 import java.io.File
 import java.net.Inet4Address
@@ -36,10 +37,11 @@ class WebDAVService : Service() {
         )
 
         val notification = NotificationCompat.Builder(this, channelId)
+            .setSmallIcon(R.drawable.ic_stat_name)
             .setContentTitle("Network discovery is turned on")
             .setContentText("Your phone can be accessed by your PC")
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setOngoing(true)
+            .setColor("#5BACD6".toColorInt())
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "TURN OFF", stopPendingIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
@@ -58,7 +60,7 @@ class WebDAVService : Service() {
         Log.d(tag, "Starting servers on IP: $ip")
 
         try {
-            activeServers.add(WebDAVServer(8080, Environment.getExternalStorageDirectory()))
+            activeServers.add(WebDAVServer(8080, Environment.getExternalStorageDirectory(), this))
         } catch (e: Exception) {
             Log.e(tag, "Failed to start internal server: ${e.message}")
         }
@@ -73,7 +75,7 @@ class WebDAVService : Service() {
                     val sdRoot = File(storagePath)
                     if (sdRoot.exists() && sdRoot.canRead()) {
                         try {
-                            activeServers.add(WebDAVServer(nextPort, sdRoot))
+                            activeServers.add(WebDAVServer(nextPort, sdRoot, this))
                             nextPort++
                         } catch (e: Exception) {
                             Log.e(tag, "Failed to start SD server: ${e.message}")
