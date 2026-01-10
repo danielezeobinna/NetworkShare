@@ -117,9 +117,16 @@ class WebDAVServer(
         val path = target.absolutePath
         if (target.isFile) {
             if (!PersistenceGuard.isSafeToDelete(context, path)) {
+
+                if (context is WebDAVService) {
+                    context.showSafetyAlert(target.name)
+                }
+
+                Log.w(tag, "Safety Lock Active: Blocking DELETE for ${target.name}")
                 return newFixedLengthResponse(Response.Status.FORBIDDEN, MIME_PLAINTEXT, "Safety Lock Active")
             }
         }
+
         return if (target.deleteRecursively()) {
             PersistenceGuard.clear(context, path)
             newFixedLengthResponse(Response.Status.NO_CONTENT, MIME_PLAINTEXT, "")
@@ -166,22 +173,41 @@ class WebDAVServer(
             } else {
                 val path = target.absolutePath
                 PersistenceGuard.markStarted(context, path)
+
                 val fileStream = object : FileInputStream(target) {
                     var totalBytesRead = 0L
+
                     override fun read(b: ByteArray, off: Int, len: Int): Int {
-                        val bytesRead = super.read(b, off, len)
-                        if (bytesRead != -1) {
-                            totalBytesRead += bytesRead
+                        return try {
+                            val bytesRead = super.read(b, off, len)
+                            if (bytesRead != -1) {
+                                totalBytesRead += bytesRead
+                            }
+                            if (totalBytesRead >= target.length()) {
+                                PersistenceGuard.markVerified(context, path)
+                            }
+                            bytesRead
+                        } catch (e: IOException) {
+                            close()
+                            throw e
                         }
-                        if (totalBytesRead >= target.length()) {
-                            PersistenceGuard.markVerified(context, path)
+                    }
+
+                    override fun close() {
+                        super.close()
+                        if (totalBytesRead < target.length()) {
+                            Log.w(tag, "Transfer failed at $totalBytesRead bytes. Safety lock maintained.")
+                            PersistenceGuard.markStarted(context, path)
                         }
-                        return bytesRead
                     }
                 }
-                newFixedLengthResponse(Response.Status.OK, "application/octet-stream", fileStream, target.length())
+
+                val res = newFixedLengthResponse(Response.Status.OK, "application/octet-stream", fileStream, target.length())
+                res.addHeader("Connection", "close")
+                return res
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.e(tag, "Read Error: ${e.message}")
             newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Read Error")
         }
     }

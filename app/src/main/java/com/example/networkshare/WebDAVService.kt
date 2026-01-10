@@ -16,6 +16,7 @@ class WebDAVService : Service() {
     private val activeServers = mutableListOf<WebDAVServer>()
     private val channelId = "WebDAV_Service_Channel"
     private val tag = "WebDAVService"
+    private val safetyChannelId = "WebDAV_Safety_Alerts"
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "STOP_SERVICE") {
@@ -63,6 +64,26 @@ class WebDAVService : Service() {
         startWebDAVServers()
 
         return START_STICKY
+    }
+
+    fun showSafetyAlert(fileName: String) {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        }
+        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
+
+        val builder = NotificationCompat.Builder(this, safetyChannelId)
+            .setSmallIcon(android.R.drawable.stat_sys_warning)
+            .setContentTitle("File Safety Lock Active")
+            .setContentText("A recent transfer failed. Please wait for 60s before interacting with '$fileName' again.")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setColor("#5BACD6".toColorInt())
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+
+        val manager = getSystemService(NotificationManager::class.java)
+        manager?.notify(fileName.hashCode(), builder.build())
     }
 
     private fun startWebDAVServers() {
@@ -119,12 +140,24 @@ class WebDAVService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun createNotificationChannel() {
-        val channel = NotificationChannel(
+        val manager = getSystemService(NotificationManager::class.java)
+
+        val discoveryChannel = NotificationChannel(
             channelId,
             "Network Discovery",
             NotificationManager.IMPORTANCE_LOW
         )
-        val manager = getSystemService(NotificationManager::class.java)
-        manager?.createNotificationChannel(channel)
+        manager?.createNotificationChannel(discoveryChannel)
+
+        val safetyChannel = NotificationChannel(
+            safetyChannelId,
+            "File Safety Alerts",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "Alerts you when a file is locked for safety"
+            enableLights(true)
+            vibrationPattern = longArrayOf(0, 250, 250, 250)
+        }
+        manager?.createNotificationChannel(safetyChannel)
     }
 }
