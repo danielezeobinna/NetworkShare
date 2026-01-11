@@ -20,17 +20,20 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import java.net.Inet4Address
 import java.net.NetworkInterface
+import com.example.networkshare.ui.theme.NetworkShareTheme
 
 class MainActivity : ComponentActivity() {
 
     private var serverAddresses by mutableStateOf("Service is off")
     private var isDiscoveryOn by mutableStateOf(false)
+    private var isPending by mutableStateOf(false)
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -53,16 +56,34 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        initPermissions()
+
+        isDiscoveryOn = isServiceRunning()
+        if (isDiscoveryOn) updateAddresses()
+
+        setContent {
+            NetworkShareTheme {
+                Surface(modifier = Modifier.fillMaxSize()) {
+                    DiscoveryScreen(
+                        isOn = isDiscoveryOn,
+                        isPending = isPending,
+                        addresses = serverAddresses,
+                        onToggle = { start -> handleToggle(start) }
+                    )
+                }
+            }
+        }
+    }
+
     override fun onStart() {
         super.onStart()
         val filter = IntentFilter("com.example.networkshare.SERVER_STOPPED")
-
         val listenFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             RECEIVER_NOT_EXPORTED
-        } else {
-            0
-        }
-
+        } else { 0 }
         registerReceiver(receiver, filter, listenFlag)
     }
 
@@ -71,43 +92,16 @@ class MainActivity : ComponentActivity() {
         try { unregisterReceiver(receiver) } catch (_: Exception) {}
     }
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
-
-        initPermissions()
-
-        isDiscoveryOn = isServiceRunning()
-        if (isDiscoveryOn) updateAddresses()
-
-        setContent {
-            MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                        DiscoveryScreen(
-                            isOn = isDiscoveryOn,
-                            addresses = serverAddresses,
-                            onToggle = { start -> handleToggle(start) },
-                            modifier = Modifier.padding(innerPadding)
-                        )
-                    }
-                }
-            }
-        }
-    }
-
     override fun onResume() {
         super.onResume()
         val running = isServiceRunning()
         isDiscoveryOn = running
-        if (running) {
-            updateAddresses()
-        } else {
-            serverAddresses = "Service is off"
-        }
+        if (running) updateAddresses() else serverAddresses = "Service is off"
     }
 
     private fun handleToggle(start: Boolean) {
+        if (isPending) return
+        isPending = true
         if (start && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {
@@ -125,14 +119,18 @@ class MainActivity : ComponentActivity() {
 
     private fun toggleService(start: Boolean) {
         val intent = Intent(this, WebDAVService::class.java)
-        if (start) {
-            startForegroundService(intent)
-            isDiscoveryOn = true
-            updateAddresses()
-        } else {
-            stopService(intent)
-            isDiscoveryOn = false
-            serverAddresses = "Service is off"
+        try {
+            if (start) {
+                startForegroundService(intent)
+                isDiscoveryOn = true
+                updateAddresses()
+            } else {
+                stopService(intent)
+                isDiscoveryOn = false
+                serverAddresses = "Service is off"
+            }
+        } finally {
+            window.decorView.postDelayed({ isPending = false }, 500)
         }
     }
 
@@ -171,27 +169,64 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun DiscoveryScreen(
     isOn: Boolean,
+    isPending: Boolean,
     addresses: String,
     onToggle: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Column(modifier = modifier.padding(24.dp)) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .padding(24.dp)
+    ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(text = "Network discovery", fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                Text(text = "Your phone can be accessed by your PC on the network", fontSize = 14.sp)
+                Text(
+                    text = "Network discovery",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp
+                )
+                Text(
+                    text = "Your phone can be accessed by your PC on the network",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    lineHeight = 18.sp
+                )
             }
-            Switch(checked = isOn, onCheckedChange = { onToggle(it) })
+
+            Switch(
+                checked = isOn,
+                onCheckedChange = { onToggle(it) },
+                enabled = !isPending
+            )
         }
 
         if (isOn) {
             Spacer(modifier = Modifier.height(32.dp))
-            Surface(tonalElevation = 8.dp, shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceVariant) {
-                Text(text = addresses, modifier = Modifier.padding(16.dp), fontWeight = FontWeight.Bold)
+            Text(
+                text = "Windows Explorer Addresses:",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+            Surface(
+                tonalElevation = 4.dp,
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.surfaceVariant
+            ) {
+                Text(
+                    text = addresses,
+                    modifier = Modifier.padding(16.dp),
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 14.sp
+                )
             }
         }
     }

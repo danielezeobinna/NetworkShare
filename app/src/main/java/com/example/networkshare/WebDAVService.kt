@@ -53,7 +53,7 @@ class WebDAVService : Service() {
             .setContentTitle("Network discovery is turned on")
             .setContentText("Your phone can be accessed by your PC")
             .setOngoing(true)
-            .setColor("#5BACD6".toColorInt())
+            .setColor("#2BAED5".toColorInt())
             .setContentIntent(contentPendingIntent)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "TURN OFF", stopPendingIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -78,7 +78,7 @@ class WebDAVService : Service() {
             .setContentText("A recent transfer failed. Please wait for 60s before interacting with '$fileName' again.")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setColor("#5BACD6".toColorInt())
+            .setColor("#2BAED5".toColorInt())
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
 
