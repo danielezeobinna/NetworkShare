@@ -10,8 +10,8 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 class WebDAVServer(
-    port: Int,
-    private val rootDirectory: File,
+    val port: Int,
+    val rootDirectory: File,
     private val context: Context
 ) : NanoHTTPD(port) {
 

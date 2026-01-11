@@ -2,7 +2,6 @@ package com.example.networkshare
 
 import android.app.*
 import android.content.Intent
-import android.os.Environment
 import android.os.IBinder
 import android.util.Log
 import androidx.core.graphics.toColorInt
@@ -22,6 +21,11 @@ class WebDAVService : Service() {
         if (intent?.action == "STOP_SERVICE") {
             stopSelf()
             return START_NOT_STICKY
+        }
+
+        if (intent?.action == "REFRESH_INFO") {
+            broadcastCurrentAddresses()
+            return START_STICKY
         }
 
         createNotificationChannel()
@@ -62,6 +66,7 @@ class WebDAVService : Service() {
         startForeground(1, notification)
 
         startWebDAVServers()
+        broadcastCurrentAddresses()
 
         return START_STICKY
     }
@@ -90,33 +95,79 @@ class WebDAVService : Service() {
         if (activeServers.isNotEmpty()) return
 
         val ip = getLocalIpAddress() ?: "127.0.0.1"
-        Log.d(tag, "Starting servers on IP: $ip")
-
-        try {
-            activeServers.add(WebDAVServer(8080, Environment.getExternalStorageDirectory(), this))
-        } catch (e: Exception) {
-            Log.e(tag, "Failed to start internal server: ${e.message}")
-        }
+        var nextPort = 8080
+        val maxPort = 8089
 
         val externalDirs = getExternalFilesDirs(null)
-        var nextPort = 8081
-        externalDirs?.forEach { dir: File? ->
-            if (dir != null) {
+        val statusSummary = StringBuilder()
+
+        externalDirs?.forEach { dir ->
+            if (dir != null && nextPort <= maxPort) {
                 val path = dir.absolutePath
-                if (path.contains("/storage/") && !path.contains("/emulated/")) {
-                    val storagePath = path.split("/Android/")[0]
-                    val sdRoot = File(storagePath)
-                    if (sdRoot.exists() && sdRoot.canRead()) {
+
+                val storageRootPath = if (path.contains("/Android/")) {
+                    path.split("/Android/")[0]
+                } else { path }
+
+                val rootFile = File(storageRootPath)
+
+                if (rootFile.exists() && rootFile.canRead()) {
+
+                    while (isPortBusy(nextPort) && nextPort <= maxPort) {
+                        nextPort++
+                    }
+
+                    if (nextPort <= maxPort) {
                         try {
-                            activeServers.add(WebDAVServer(nextPort, sdRoot, this))
+                            activeServers.add(WebDAVServer(nextPort, rootFile, this))
+
+                            val label = if (storageRootPath.contains("emulated/0")) "Internal" else rootFile.name
+                            statusSummary.append("$label: http://$ip:$nextPort/\n")
+
                             nextPort++
                         } catch (e: Exception) {
-                            Log.e(tag, "Failed to start SD server: ${e.message}")
+                            Log.e(tag, "Failed to start server for $storageRootPath: ${e.message}")
                         }
                     }
                 }
             }
         }
+
+        val intent = Intent("com.example.networkshare.ADDRESSES_UPDATED")
+        intent.putExtra("address_list", statusSummary.toString().trim())
+        sendBroadcast(intent)
+    }
+
+    private fun isPortBusy(port: Int): Boolean {
+        return try {
+            java.net.ServerSocket(port).use { false }
+        } catch (_: Exception) {
+            true
+        }
+    }
+
+    private fun broadcastCurrentAddresses() {
+        val ip = getLocalIpAddress() ?: "127.0.0.1"
+        val statusSummary = StringBuilder()
+
+        activeServers.forEach { server ->
+            val path = server.rootDirectory.absolutePath
+            val name = server.rootDirectory.name
+
+            val label = when {
+                path.contains("emulated/0") -> "Internal Storage"
+
+                path.lowercase().contains("usb") -> "USB OTG ($name)"
+
+                else -> "SD Card ($name)"
+            }
+
+            statusSummary.append("$label:\nhttp://$ip:${server.port}/\n\n")
+        }
+
+        val intent = Intent("com.example.networkshare.ADDRESSES_UPDATED")
+        intent.putExtra("address_list", statusSummary.toString().trim())
+        sendBroadcast(intent)
     }
 
     private fun getLocalIpAddress(): String? {

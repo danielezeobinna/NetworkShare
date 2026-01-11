@@ -25,8 +25,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
-import java.net.Inet4Address
-import java.net.NetworkInterface
 import com.example.networkshare.ui.theme.NetworkShareTheme
 
 class MainActivity : ComponentActivity() {
@@ -51,8 +49,16 @@ class MainActivity : ComponentActivity() {
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            isDiscoveryOn = false
-            serverAddresses = "Service is off"
+            when (intent?.action) {
+                "com.example.networkshare.SERVER_STOPPED" -> {
+                    isDiscoveryOn = false
+                    serverAddresses = "Service is off"
+                }
+                "com.example.networkshare.ADDRESSES_UPDATED" -> {
+                    val data = intent.getStringExtra("address_list")
+                    serverAddresses = data ?: "No storage found"
+                }
+            }
         }
     }
 
@@ -80,7 +86,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        val filter = IntentFilter("com.example.networkshare.SERVER_STOPPED")
+        val filter = IntentFilter().apply {
+            addAction("com.example.networkshare.SERVER_STOPPED")
+            addAction("com.example.networkshare.ADDRESSES_UPDATED") // Add this!
+        }
         val listenFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             RECEIVER_NOT_EXPORTED
         } else { 0 }
@@ -96,7 +105,15 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         val running = isServiceRunning()
         isDiscoveryOn = running
-        if (running) updateAddresses() else serverAddresses = "Service is off"
+
+        if (running) {
+            val intent = Intent(this, WebDAVService::class.java).apply {
+                action = "REFRESH_INFO"
+            }
+            startService(intent)
+        } else {
+            serverAddresses = "Service is off"
+        }
     }
 
     private fun handleToggle(start: Boolean) {
@@ -135,18 +152,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updateAddresses() {
-        val ip = getLocalIpAddress() ?: "127.0.0.1"
-        serverAddresses = "Internal: http://$ip:8080/\nSD Card: http://$ip:8081/\n(Check notification for status)"
-    }
-
-    private fun getLocalIpAddress(): String? {
-        return try {
-            NetworkInterface.getNetworkInterfaces().toList()
-                .flatMap { it.inetAddresses.toList() }
-                .filterIsInstance<Inet4Address>()
-                .firstOrNull { !it.isLoopbackAddress }
-                ?.hostAddress
-        } catch (_: Exception) { null }
+        if (isDiscoveryOn) {
+            if (serverAddresses == "Service is off") {
+                serverAddresses = "Scanning storages..."
+            }
+        } else {
+            serverAddresses = "Service is off"
+        }
     }
 
     private fun initPermissions() {
@@ -210,7 +222,7 @@ fun DiscoveryScreen(
             Spacer(modifier = Modifier.height(32.dp))
             Text(
                 text = "Windows Explorer Addresses:",
-                fontSize = 12.sp,
+                fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.padding(bottom = 8.dp)
             )
@@ -225,7 +237,8 @@ fun DiscoveryScreen(
                     modifier = Modifier.padding(16.dp),
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace,
-                    fontSize = 14.sp
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             }
         }
