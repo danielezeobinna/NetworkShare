@@ -26,12 +26,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import com.example.networkshare.ui.theme.NetworkShareTheme
+import java.net.Inet4Address
+import java.net.NetworkInterface
+import android.net.ConnectivityManager
 
 class MainActivity : ComponentActivity() {
 
     private var serverAddresses by mutableStateOf("Service is off")
     private var isDiscoveryOn by mutableStateOf(false)
     private var isPending by mutableStateOf(false)
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -62,6 +66,24 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val hotspotReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val state = intent?.getIntExtra("wifi_state", 11)
+            if (state == 11 || state == 10) {
+                if (isDiscoveryOn) {
+                    val ip = getLocalIpAddress()
+                    val isLocal = ip != null && (ip.startsWith("192.") || ip.startsWith("10.") || ip.startsWith("172."))
+
+                    if (!isLocal) {
+                        toggleService(false)
+                        isDiscoveryOn = false
+                        Toast.makeText(applicationContext, "Network lost: Server stopped", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -82,13 +104,15 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+        startNetworkWatchdog()
+        registerReceiver(hotspotReceiver, IntentFilter("android.net.wifi.WIFI_AP_STATE_CHANGED"))
     }
 
     override fun onStart() {
         super.onStart()
         val filter = IntentFilter().apply {
             addAction("com.example.networkshare.SERVER_STOPPED")
-            addAction("com.example.networkshare.ADDRESSES_UPDATED") // Add this!
+            addAction("com.example.networkshare.ADDRESSES_UPDATED")
         }
         val listenFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             RECEIVER_NOT_EXPORTED
@@ -99,6 +123,13 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         try { unregisterReceiver(receiver) } catch (_: Exception) {}
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        try { unregisterReceiver(hotspotReceiver) } catch (_: Exception) {}
+        val cm = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
+        networkCallback?.let { cm.unregisterNetworkCallback(it) }
     }
 
     override fun onResume() {
@@ -116,14 +147,65 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun startNetworkWatchdog() {
+        val cm = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
+        val request = android.net.NetworkRequest.Builder().build()
+
+        networkCallback = object : ConnectivityManager.NetworkCallback() {
+            override fun onLost(network: android.net.Network) { checkAndTurnOff() }
+            override fun onCapabilitiesChanged(network: android.net.Network, nc: android.net.NetworkCapabilities) { checkAndTurnOff() }
+
+            private fun checkAndTurnOff() {
+                runOnUiThread {
+                    val ip = getLocalIpAddress()
+                    val isLocal = ip != null && (ip.startsWith("192.") || ip.startsWith("10.") || ip.startsWith("172."))
+
+                    if (isDiscoveryOn && !isLocal) {
+                        toggleService(false)
+                        isDiscoveryOn = false
+                        serverAddresses = "Service is off"
+                        Toast.makeText(applicationContext, "Network lost: Server OFF", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+        networkCallback?.let { cm.registerNetworkCallback(request, it) }
+    }
+
     private fun handleToggle(start: Boolean) {
         if (isPending) return
+
+        if (start) {
+            val currentIp = getLocalIpAddress()
+            val isLocal = currentIp != null && (
+                    currentIp.startsWith("192.") ||
+                            currentIp.startsWith("10.") ||
+                            currentIp.startsWith("172.")
+                    )
+
+            if (!isLocal) {
+                Toast.makeText(this, "WiFi or Hotspot required", Toast.LENGTH_SHORT).show()
+                isDiscoveryOn = false
+                return
+            }
+        }
+
         isPending = true
         if (start && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {
             toggleService(start)
         }
+    }
+
+    private fun getLocalIpAddress(): String? {
+        return try {
+            NetworkInterface.getNetworkInterfaces().toList()
+                .flatMap { it.inetAddresses.toList() }
+                .filterIsInstance<Inet4Address>()
+                .firstOrNull { !it.isLoopbackAddress }
+                ?.hostAddress
+        } catch (_: Exception) { null }
     }
 
     private fun isServiceRunning(): Boolean {
