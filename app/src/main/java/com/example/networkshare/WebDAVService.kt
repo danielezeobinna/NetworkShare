@@ -92,17 +92,9 @@ class WebDAVService : Service() {
     }
 
     private fun startWebDAVServers() {
-        val ip = getLocalIpAddress()
-        if (ip == null) {
-            Log.d(tag, "No network detected. Stopping service.")
-            stopSelf()
-            return
-        }
-
         if (activeServers.isNotEmpty()) return
 
-        Log.d(tag, "No network detected. Stopping service")
-
+        val ip = getLocalIpAddress() ?: "127.0.0.1"
         var nextPort = 8080
         val maxPort = 8089
 
