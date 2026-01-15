@@ -26,10 +26,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import com.example.networkshare.ui.theme.NetworkShareTheme
+import androidx.compose.ui.graphics.Color
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.core.content.edit
 
 class MainActivity : ComponentActivity() {
 
-    private var serverAddresses by mutableStateOf("Service is off")
+    private var serverAddresses by mutableStateOf("Internal Storage:\nhttp://0.0.0.0:8080/")
     private var isDiscoveryOn by mutableStateOf(false)
     private var isPending by mutableStateOf(false)
 
@@ -52,11 +57,13 @@ class MainActivity : ComponentActivity() {
             when (intent?.action) {
                 "com.example.networkshare.SERVER_STOPPED" -> {
                     isDiscoveryOn = false
-                    serverAddresses = "Service is off"
                 }
                 "com.example.networkshare.ADDRESSES_UPDATED" -> {
                     val data = intent.getStringExtra("address_list")
-                    serverAddresses = data ?: "No storage found"
+                    if (data != null) {
+                        serverAddresses = data
+                        saveAddresses(data)
+                    }
                 }
             }
         }
@@ -66,6 +73,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         initPermissions()
+
+        loadAddresses()
 
         isDiscoveryOn = isServiceRunning()
         if (isDiscoveryOn) updateAddresses()
@@ -111,9 +120,20 @@ class MainActivity : ComponentActivity() {
                 action = "REFRESH_INFO"
             }
             startService(intent)
-        } else {
-            serverAddresses = "Service is off"
         }
+    }
+
+    private fun saveAddresses(addresses: String) {
+        val sharedPref = getPreferences(MODE_PRIVATE)
+        sharedPref.edit(commit = false) {
+            putString("last_addresses", addresses)
+        }
+    }
+
+    private fun loadAddresses() {
+        val sharedPref = getPreferences(MODE_PRIVATE)
+        val saved = sharedPref.getString("last_addresses", "Internal Storage:\nhttp://0.0.0.0:8080/")
+        serverAddresses = saved ?: "Internal Storage:\nhttp://0.0.0.0:8080/"
     }
 
     private fun handleToggle(start: Boolean) {
@@ -144,7 +164,6 @@ class MainActivity : ComponentActivity() {
             } else {
                 stopService(intent)
                 isDiscoveryOn = false
-                serverAddresses = "Service is off"
             }
         } finally {
             window.decorView.postDelayed({ isPending = false }, 500)
@@ -152,12 +171,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updateAddresses() {
-        if (isDiscoveryOn) {
-            if (serverAddresses == "Service is off") {
-                serverAddresses = "Scanning storages..."
-            }
-        } else {
-            serverAddresses = "Service is off"
+        if (isDiscoveryOn && serverAddresses.contains("0.0.0.0")) {
+            serverAddresses = "Scanning storages..."
         }
     }
 
@@ -186,6 +201,8 @@ fun DiscoveryScreen(
     onToggle: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isDark = isSystemInDarkTheme()
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -214,33 +231,45 @@ fun DiscoveryScreen(
             Switch(
                 checked = isOn,
                 onCheckedChange = { onToggle(it) },
-                enabled = !isPending
+                enabled = !isPending,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = if (isDark) Color.Black else Color.White,
+                    uncheckedThumbColor = if (isDark) Color.White else Color(0xFF666660),
+
+                    uncheckedTrackColor = if (isDark) Color(0xFF666660) else Color(0xFFEEF1F3),
+
+                    uncheckedBorderColor = Color(0xFF666660)
+                )
             )
         }
 
-        if (isOn) {
-            Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(32.dp))
+        Text(
+            text = "Windows Explorer Addresses:",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(bottom = 8.dp),
+            color = if (isOn) MaterialTheme.colorScheme.onSurface
+            else Color.Gray
+        )
+        Surface(
+            tonalElevation = 4.dp,
+            shape = MaterialTheme.shapes.medium,
+            modifier = Modifier.fillMaxWidth(),
+            color = if (isOn) MaterialTheme.colorScheme.surfaceVariant
+            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        ) {
             Text(
-                text = "Windows Explorer Addresses:",
+                text = addresses,
+                modifier = Modifier
+                    .padding(16.dp)
+                    .graphicsLayer(alpha = if (isOn) 1f else 0.5f),
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace,
                 fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(bottom = 8.dp)
+                color = if (isOn) MaterialTheme.colorScheme.onSurface
+                else Color.Gray
             )
-            Surface(
-                tonalElevation = 4.dp,
-                shape = MaterialTheme.shapes.medium,
-                modifier = Modifier.fillMaxWidth(),
-                color = MaterialTheme.colorScheme.surfaceVariant
-            ) {
-                Text(
-                    text = addresses,
-                    modifier = Modifier.padding(16.dp),
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-            }
         }
     }
 }
