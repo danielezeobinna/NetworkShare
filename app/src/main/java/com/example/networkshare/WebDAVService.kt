@@ -75,7 +75,7 @@ class WebDAVService : Service() {
         android.os.Handler(android.os.Looper.getMainLooper()).post {
             android.widget.Toast.makeText(
                 this,
-                "Safety Lock Active: $fileName for 60 seconds",
+                "Safety Lock Active: $fileName. Please wait for 60 seconds",
                 android.widget.Toast.LENGTH_LONG
             ).show()
         }
