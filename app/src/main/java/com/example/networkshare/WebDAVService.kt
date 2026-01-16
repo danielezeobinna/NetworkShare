@@ -72,6 +72,14 @@ class WebDAVService : Service() {
     }
 
     fun showSafetyAlert(fileName: String) {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            android.widget.Toast.makeText(
+                this,
+                "Safety Lock Active: $fileName for 60 seconds",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+        }
+
         val intent = Intent(this, MainActivity::class.java).apply {
             setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
         }
@@ -80,11 +88,12 @@ class WebDAVService : Service() {
         val builder = NotificationCompat.Builder(this, safetyChannelId)
             .setSmallIcon(android.R.drawable.stat_sys_warning)
             .setContentTitle("File Safety Lock Active")
-            .setContentText("A recent transfer failed. Please wait for 60s before interacting with '$fileName' again.")
+            .setContentText("A recent transfer of '$fileName' failed. Please wait for up to a minute before interacting with again.")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setColor("#2BAED5".toColorInt())
             .setAutoCancel(true)
+            .setTimeoutAfter(60000)
             .setContentIntent(pendingIntent)
 
         val manager = getSystemService(NotificationManager::class.java)

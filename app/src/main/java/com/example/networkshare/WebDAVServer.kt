@@ -8,6 +8,11 @@ import java.io.FileInputStream
 import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.*
+import android.app.NotificationManager
+import androidx.core.app.NotificationCompat
+import androidx.core.graphics.toColorInt
+import kotlin.math.log10
+import kotlin.math.pow
 
 class WebDAVServer(
     val port: Int,
@@ -61,11 +66,28 @@ class WebDAVServer(
         }
     }
 
+    fun formatSize(bytes: Long): String {
+        if (bytes <= 0) return "0 B"
+        val units = arrayOf("B", "KB", "MB", "GB", "TB")
+        val digitGroups = (log10(bytes.toDouble()) / log10(1024.0)).toInt()
+        return String.format("%.1f %s", bytes / 1024.0.pow(digitGroups.toDouble()), units[digitGroups])
+    }
+
     private fun handlePut(session: IHTTPSession, target: File): Response {
         return try {
             target.parentFile?.mkdirs()
             val inputStream = session.inputStream
             val contentLength = session.headers["content-length"]?.toLong() ?: 0L
+
+            val manager = context.getSystemService(NotificationManager::class.java)
+            val builder = NotificationCompat.Builder(context, "WebDAV_Service_Channel")
+                .setSmallIcon(android.R.drawable.stat_sys_download)
+                .setContentTitle("Downloading ${target.name}")
+                .setColor("#2BAED5".toColorInt())
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+
             target.outputStream().use { output ->
                 val buffer = ByteArray(65536)
                 var totalRead = 0L
@@ -74,8 +96,16 @@ class WebDAVServer(
                     if (read == -1) break
                     output.write(buffer, 0, read)
                     totalRead += read
+
+                    val percent = (totalRead * 100 / contentLength).toInt()
+                    if (percent % 5 == 0) {
+                        builder.setProgress(100, percent, false)
+                        builder.setContentText("${formatSize(totalRead)} / ${formatSize(contentLength)}")
+                        manager?.notify(target.name.hashCode(), builder.build())
+                    }
                 }
             }
+            manager?.cancel(target.name.hashCode())
             newFixedLengthResponse(Response.Status.CREATED, MIME_PLAINTEXT, "")
         } catch (e: Exception) {
             newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, e.message)
@@ -172,17 +202,41 @@ class WebDAVServer(
                 newFixedLengthResponse(Response.Status.FORBIDDEN, MIME_PLAINTEXT, "Directory GET forbidden")
             } else {
                 val path = target.absolutePath
+                val notificationId = target.name.hashCode()
                 PersistenceGuard.markStarted(context, path)
+
+                val manager = context.getSystemService(NotificationManager::class.java)
+                val builder = NotificationCompat.Builder(context, "WebDAV_Service_Channel")
+                    .setSmallIcon(android.R.drawable.stat_sys_upload)
+                    .setContentTitle("Uploading ${target.name}")
+                    .setColor("#2BAED5".toColorInt())
+                    .setOngoing(true)
+                    .setOnlyAlertOnce(true)
+                    .setPriority(NotificationCompat.PRIORITY_LOW)
 
                 val fileStream = object : FileInputStream(target) {
                     var totalBytesRead = 0L
+                    var lastPercent = -1
 
                     override fun read(b: ByteArray, off: Int, len: Int): Int {
                         return try {
                             val bytesRead = super.read(b, off, len)
                             if (bytesRead != -1) {
                                 totalBytesRead += bytesRead
+
+                                val totalSize = target.length()
+                                if (totalSize > 0) {
+                                    val percent = (totalBytesRead * 100 / totalSize).toInt()
+
+                                    if (percent != lastPercent && percent % 5 == 0) {
+                                        builder.setProgress(100, percent, false)
+                                        builder.setContentText("${formatSize(totalBytesRead)} / ${formatSize(totalSize)}")
+                                        manager?.notify(notificationId, builder.build())
+                                        lastPercent = percent
+                                    }
+                                }
                             }
+
                             if (totalBytesRead >= target.length()) {
                                 PersistenceGuard.markVerified(context, path)
                             }
@@ -195,6 +249,8 @@ class WebDAVServer(
 
                     override fun close() {
                         super.close()
+                        manager?.cancel(notificationId)
+
                         if (totalBytesRead < target.length()) {
                             Log.w(tag, "Transfer failed at $totalBytesRead bytes. Safety lock maintained.")
                             PersistenceGuard.markStarted(context, path)
