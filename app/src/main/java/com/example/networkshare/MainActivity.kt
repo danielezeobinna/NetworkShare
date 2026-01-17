@@ -15,6 +15,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -31,6 +33,9 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.core.content.edit
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.res.painterResource
 
 class MainActivity : ComponentActivity() {
 
@@ -81,13 +86,20 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             NetworkShareTheme {
+                val isPickerOpen = remember { mutableStateOf(false) }
+
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    DiscoveryScreen(
-                        isOn = isDiscoveryOn,
-                        isPending = isPending,
-                        addresses = serverAddresses,
-                        onToggle = { start -> handleToggle(start) }
-                    )
+                    if (!isPickerOpen.value) {
+                        DiscoveryScreen(
+                            isOn = isDiscoveryOn,
+                            isPending = isPending,
+                            addresses = serverAddresses,
+                            onToggle = { start -> handleToggle(start) },
+                            onOpenPicker = { isPickerOpen.value = true }
+                        )
+                    } else {
+                        FilePickerSection(onBack = { isPickerOpen.value = false })
+                    }
                 }
             }
         }
@@ -199,6 +211,7 @@ fun DiscoveryScreen(
     isPending: Boolean,
     addresses: String,
     onToggle: (Boolean) -> Unit,
+    onOpenPicker: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val isDark = isSystemInDarkTheme()
@@ -209,6 +222,7 @@ fun DiscoveryScreen(
             .statusBarsPadding()
             .padding(24.dp)
     ) {
+        Spacer(modifier = Modifier.height(32.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -243,7 +257,32 @@ fun DiscoveryScreen(
             )
         }
 
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(20.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End
+        ) {
+            TextButton(
+                onClick = onOpenPicker,
+                contentPadding = PaddingValues(0.dp)
+            ) {
+                Image(
+                    painter = painterResource(id = R.drawable.ic_sp),
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp)
+                )
+
+                Spacer(modifier = Modifier.width(4.dp))
+
+                Text(
+                    text = "Choose Shared Paths...",
+                    fontSize = 16.sp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
         Text(
             text = "Windows Explorer Addresses:",
             fontSize = 14.sp,
@@ -270,6 +309,20 @@ fun DiscoveryScreen(
                 color = if (isOn) MaterialTheme.colorScheme.onSurface
                 else Color.Gray
             )
+        }
+    }
+}
+
+@Composable
+fun FilePickerSection(onBack: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black),
+        contentAlignment = Alignment.Center
+    ) {
+        Button(onClick = onBack) {
+            Text("Go Back")
         }
     }
 }
