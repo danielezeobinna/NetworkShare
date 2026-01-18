@@ -229,7 +229,6 @@ class WebDAVService : Service() {
         manager?.createNotificationChannel(safetyChannel)
     }
 
-    // UPDATE YOUR COMPANION OBJECT TO THIS:
     companion object {
         var scannedItems = mutableStateListOf<FolderItem>() // Changed from File to FolderItem
         var isScanning = mutableStateOf(false)
