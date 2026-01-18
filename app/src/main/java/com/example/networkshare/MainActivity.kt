@@ -39,6 +39,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.painterResource
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.border
 import androidx.compose.foundation.lazy.LazyColumn
 import java.io.File // Fixes 'File' errors
 import androidx.compose.foundation.shape.RoundedCornerShape // Fixes 'RoundedCornerShape'
@@ -357,14 +358,12 @@ fun FilePickerSection(onBack: () -> Unit) {
     val activity = context as MainActivity
     var currentPath by remember { mutableStateOf<File?>(null) }
 
-    // Observe the new FolderItem list
     val itemsToShow = WebDAVService.scannedItems.sortedBy { it.name.lowercase() }
     val isLoading = WebDAVService.isScanning.value
 
     LaunchedEffect(currentPath) {
         if (currentPath == null) {
             WebDAVService.scannedItems.clear()
-            // Convert storage files to FolderItems
             val roots = activity.getAvailableStorages().map {
                 FolderItem(it, it.name, true)
             }
@@ -442,7 +441,8 @@ fun FilePickerSection(onBack: () -> Unit) {
 
                 StorageRow(
                     name = label,
-                    path = if (isStorageRoot) folderItem.file.absolutePath else "Folder",
+                    path = if (currentPath == null) folderItem.file.absolutePath else "Folder",
+                    fullPath = folderItem.file.absolutePath,
                     onClick = {
                         // ZERO LAG: Use the pre-calculated boolean
                         if (folderItem.hasSubFolders || isStorageRoot) {
@@ -458,34 +458,72 @@ fun FilePickerSection(onBack: () -> Unit) {
 }
 
 @Composable
-fun StorageRow(name: String, path: String, onClick: () -> Unit) {
+fun StorageRow(
+    name: String,
+    path: String,
+    fullPath: String,
+    onClick: () -> Unit
+) {
+    // 1. Explicitly checked
+    val isChecked = WebDAVService.selectedPaths.contains(fullPath)
+
+    // 2. Grayed out because a Parent is checked
+    val isInherited = remember(WebDAVService.selectedPaths.size) {
+        WebDAVService.selectedPaths.any { fullPath.startsWith("$it/") }
+    }
+
+    // 3. Highlighted because a Child is checked (The VLC "Square" state)
+    val isPartiallyChecked = remember(WebDAVService.selectedPaths.size) {
+        !isChecked && !isInherited && WebDAVService.selectedPaths.any { it.startsWith("$fullPath/") }
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = ripple(color = Color.Gray),
-                onClick = onClick
-            )
+            .clickable(onClick = onClick)
             .padding(vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // ... (Your existing Icon/Text Column) ...
         Box(
             modifier = Modifier
                 .size(40.dp)
                 .background(Color(0xFF1A1A1A), RoundedCornerShape(8.dp)),
             contentAlignment = Alignment.Center
         ) {
-            // If the path says "Folder", use a folder icon, otherwise use a drive icon
             Text(if (path == "Folder") "📁" else "💾", fontSize = 20.sp)
         }
 
         Spacer(modifier = Modifier.width(16.dp))
 
-        Column {
-            Text(text = name, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-            if (path != "Folder") {
-                Text(text = path, color = Color.DarkGray, fontSize = 12.sp)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(text = name, color = if (isInherited) Color.Gray else Color.White, fontSize = 16.sp)
+        }
+
+        // THE VLC CHECKBOX
+        Box(
+            modifier = Modifier
+                .size(28.dp)
+                .padding(4.dp)
+                .border(
+                    2.dp,
+                    if (isChecked || isPartiallyChecked || isInherited) Color(0xFF2BAED5) else Color.Gray,
+                    RoundedCornerShape(6.dp)
+                )
+                .background(
+                    if (isChecked || isInherited) Color(0xFF2BAED5) else Color.Transparent,
+                    RoundedCornerShape(6.dp)
+                )
+                .clickable {
+                    if (!isInherited) WebDAVService.toggleSelection(fullPath)
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            if (isChecked || isInherited) {
+                Text("✓", color = if (isInherited) Color.DarkGray else Color.Black, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            } else if (isPartiallyChecked) {
+                // The "Highlighted" Square for partial selection
+                Box(modifier = Modifier.size(10.dp).background(Color(0xFF2BAED5), RoundedCornerShape(2.dp)))
             }
         }
     }

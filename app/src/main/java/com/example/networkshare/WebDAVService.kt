@@ -233,6 +233,15 @@ class WebDAVService : Service() {
     companion object {
         var scannedItems = mutableStateListOf<FolderItem>() // Changed from File to FolderItem
         var isScanning = mutableStateOf(false)
+        var selectedPaths = mutableStateListOf<String>()
+
+        fun toggleSelection(path: String) {
+            if (selectedPaths.contains(path)) {
+                selectedPaths.remove(path)
+            } else {
+                selectedPaths.add(path)
+            }
+        }
 
         fun requestFolderScan(directory: File?) {
             if (directory == null) return
