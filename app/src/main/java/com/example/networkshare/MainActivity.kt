@@ -358,7 +358,7 @@ fun FilePickerSection(onBack: () -> Unit) {
     var currentPath by remember { mutableStateOf<File?>(null) }
 
     // Observe the new FolderItem list
-    val itemsToShow = WebDAVService.scannedItems
+    val itemsToShow = WebDAVService.scannedItems.sortedBy { it.name.lowercase() }
     val isLoading = WebDAVService.isScanning.value
 
     LaunchedEffect(currentPath) {
