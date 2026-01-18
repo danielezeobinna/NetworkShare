@@ -4,11 +4,19 @@ import android.app.*
 import android.content.Intent
 import android.os.IBinder
 import android.util.Log
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.core.graphics.toColorInt
 import androidx.core.app.NotificationCompat
 import java.io.File
 import java.net.Inet4Address
 import java.net.NetworkInterface
+
+data class FolderItem(
+    val file: File,
+    val name: String,
+    val hasSubFolders: Boolean
+)
 
 class WebDAVService : Service() {
 
@@ -219,5 +227,38 @@ class WebDAVService : Service() {
             vibrationPattern = longArrayOf(0, 250, 250, 250)
         }
         manager?.createNotificationChannel(safetyChannel)
+    }
+
+    // UPDATE YOUR COMPANION OBJECT TO THIS:
+    companion object {
+        var scannedItems = mutableStateListOf<FolderItem>() // Changed from File to FolderItem
+        var isScanning = mutableStateOf(false)
+
+        fun requestFolderScan(directory: File?) {
+            if (directory == null) return
+            isScanning.value = true
+
+            Thread {
+                try {
+                    // ALL DISK ACTIVITY HAPPENS HERE IN THE BACKGROUND
+                    val items = directory.listFiles()?.filter { it.isDirectory }?.map {
+                        FolderItem(
+                            file = it,
+                            name = it.name,
+                            // Pre-calculate this so the UI doesn't lag!
+                            hasSubFolders = it.listFiles()?.any { sub -> sub.isDirectory } ?: false
+                        )
+                    } ?: emptyList()
+
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        scannedItems.clear()
+                        scannedItems.addAll(items)
+                        isScanning.value = false
+                    }
+                } catch (_: Exception) {
+                    isScanning.value = false
+                }
+            }.start()
+        }
     }
 }
