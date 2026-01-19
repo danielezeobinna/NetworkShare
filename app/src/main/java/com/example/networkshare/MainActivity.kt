@@ -84,20 +84,17 @@ class MainActivity : ComponentActivity() {
 
     internal fun getAvailableStorages(): List<File> {
         val storages = mutableListOf<File>()
-        // This gets all accessible paths (Internal, SD, USB)
         val dirs = getExternalFilesDirs(null)
 
         dirs.forEach { dir ->
             if (dir != null) {
                 val path = dir.absolutePath
-                // We strip the Android/data/... part to get the root
                 val rootPath = if (path.contains("/Android/")) {
                     path.split("/Android/")[0]
                 } else { path }
 
                 val rootFile = File(rootPath)
 
-                // Check if it's already in our list to avoid duplicates
                 if (rootFile.exists() && rootFile.canRead() && !storages.contains(rootFile)) {
                     storages.add(rootFile)
                 }
@@ -110,7 +107,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         initPermissions()
-
+        WebDAVService.loadPaths(this)
         loadAddresses()
 
         isDiscoveryOn = isServiceRunning()
@@ -373,16 +370,18 @@ fun FilePickerSection(onBack: () -> Unit) {
         }
     }
 
-    // Logic for the Back Button
     BackHandler {
         if (currentPath == null) {
-            onBack() // Exit the dark screen
+            val intent = Intent(context, WebDAVService::class.java).apply {
+                action = "REFRESH_INFO"
+            }
+            context.startService(intent)
+
+            onBack()
         } else {
-            // Go up one level. If we are at the root of a storage, go back to Storage List
             val parent = currentPath?.parentFile
             val storages = activity.getAvailableStorages()
 
-            // If the current path is one of our root storages, the "parent" should be the storage list (null)
             currentPath = if (storages.any { it.absolutePath == currentPath?.absolutePath }) {
                 null
             } else {
@@ -398,7 +397,6 @@ fun FilePickerSection(onBack: () -> Unit) {
             .statusBarsPadding()
             .padding(24.dp)
     ) {
-        // Dynamic Title: Shows "Storage" or the name of the folder you are in
         Text(
             text = currentPath?.name ?: "Storage & Folders",
             color = Color.White,
@@ -423,10 +421,8 @@ fun FilePickerSection(onBack: () -> Unit) {
                 .graphicsLayer(alpha = if (isLoading) 0.5f else 1f),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            items(
-                items = itemsToShow,
-                key = { it.file.absolutePath } // Keying by path is very important for speed
-            ) { folderItem ->
+            items(itemsToShow, key = { it.file.absolutePath }) { folderItem ->
+
                 val isStorageRoot = currentPath == null
 
                 val label = remember(folderItem, currentPath) {
@@ -444,7 +440,6 @@ fun FilePickerSection(onBack: () -> Unit) {
                     path = if (currentPath == null) folderItem.file.absolutePath else "Folder",
                     fullPath = folderItem.file.absolutePath,
                     onClick = {
-                        // ZERO LAG: Use the pre-calculated boolean
                         if (folderItem.hasSubFolders || isStorageRoot) {
                             currentPath = folderItem.file
                         } else {
@@ -464,17 +459,21 @@ fun StorageRow(
     fullPath: String,
     onClick: () -> Unit
 ) {
-    // 1. Explicitly checked
-    val isChecked = WebDAVService.selectedPaths.contains(fullPath)
-
-    // 2. Grayed out because a Parent is checked
-    val isInherited = remember(WebDAVService.selectedPaths.size) {
-        WebDAVService.selectedPaths.any { fullPath.startsWith("$it/") }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val isChecked = remember(fullPath, WebDAVService.selectedPaths.size) {
+        WebDAVService.selectedPaths.contains(fullPath)
     }
 
-    // 3. Highlighted because a Child is checked (The VLC "Square" state)
-    val isPartiallyChecked = remember(WebDAVService.selectedPaths.size) {
-        !isChecked && !isInherited && WebDAVService.selectedPaths.any { it.startsWith("$fullPath/") }
+    val isInherited = remember(fullPath, WebDAVService.selectedPaths.size) {
+        WebDAVService.selectedPaths.any { shared ->
+            fullPath.startsWith("$shared/") && fullPath != shared
+        }
+    }
+
+    val isPartiallyChecked = remember(fullPath, WebDAVService.selectedPaths.size) {
+        !isChecked && !isInherited && WebDAVService.selectedPaths.any { shared ->
+            shared.startsWith("$fullPath/") && shared != fullPath
+        }
     }
 
     Row(
@@ -484,7 +483,6 @@ fun StorageRow(
             .padding(vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // ... (Your existing Icon/Text Column) ...
         Box(
             modifier = Modifier
                 .size(40.dp)
@@ -502,6 +500,7 @@ fun StorageRow(
 
         // THE VLC CHECKBOX
         Box(
+            contentAlignment = Alignment.Center,
             modifier = Modifier
                 .size(28.dp)
                 .padding(4.dp)
@@ -515,14 +514,21 @@ fun StorageRow(
                     RoundedCornerShape(6.dp)
                 )
                 .clickable {
-                    if (!isInherited) WebDAVService.toggleSelection(fullPath)
-                },
-            contentAlignment = Alignment.Center
+                    if (!isInherited) {
+                        WebDAVService.toggleSelection(context, fullPath)
+
+                        if (WebDAVService.activeServers.isNotEmpty()) {
+                            val intent = Intent(context, WebDAVService::class.java).apply {
+                                action = "START_SERVERS"
+                            }
+                            context.startForegroundService(intent)
+                        }
+                    }
+                }
         ) {
             if (isChecked || isInherited) {
                 Text("✓", color = if (isInherited) Color.DarkGray else Color.Black, fontWeight = FontWeight.Bold, fontSize = 14.sp)
             } else if (isPartiallyChecked) {
-                // The "Highlighted" Square for partial selection
                 Box(modifier = Modifier.size(10.dp).background(Color(0xFF2BAED5), RoundedCornerShape(2.dp)))
             }
         }

@@ -1,5 +1,6 @@
 package com.example.networkshare
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.util.Log
 import fi.iki.elonen.NanoHTTPD
@@ -17,7 +18,8 @@ import kotlin.math.pow
 class WebDAVServer(
     val port: Int,
     val rootDirectory: File,
-    private val context: Context
+    private val context: Context,
+    private val allowedPaths: List<String>
 ) : NanoHTTPD(port) {
 
     private val tag = "WebDAVServer:$port"
@@ -34,7 +36,25 @@ class WebDAVServer(
     override fun serve(session: IHTTPSession): Response {
         val uri = session.uri
         val method = session.method
+
         val targetFile = File(rootDirectory, uri.trimStart('/'))
+        val targetPath = targetFile.absolutePath
+
+        if (uri == "/" || uri.isEmpty()) {
+            return if (method == Method.PROPFIND) {
+                servePropfind(targetFile, session)
+            } else {
+                serveOptions()
+            }
+        }
+
+        val isAllowed = allowedPaths.any { sharedPath ->
+            targetPath == sharedPath || targetPath.startsWith("$sharedPath/")
+        }
+
+        if (!isAllowed) {
+            return newFixedLengthResponse(Response.Status.FORBIDDEN, MIME_PLAINTEXT, "Access Denied")
+        }
 
         return when (method) {
             Method.OPTIONS -> serveOptions()
@@ -66,6 +86,7 @@ class WebDAVServer(
         }
     }
 
+    @SuppressLint("DefaultLocale")
     fun formatSize(bytes: Long): String {
         if (bytes <= 0) return "0 B"
         val units = arrayOf("B", "KB", "MB", "GB", "TB")
@@ -271,14 +292,28 @@ class WebDAVServer(
     private fun servePropfind(target: File, session: IHTTPSession): Response {
         val xml = StringBuilder("""<?xml version="1.0" encoding="utf-8" ?>""")
         xml.append("""<D:multistatus xmlns:D="DAV:">""")
+
         xml.append(getFilePropertiesXml(target, session.uri))
+
         val depth = session.headers["depth"] ?: "1"
+
         if (target.isDirectory && depth != "0") {
             target.listFiles()?.forEach { child ->
-                val childUri = "${session.uri.removeSuffix("/")}/${child.name}"
-                xml.append(getFilePropertiesXml(child, childUri))
+                val childPath = child.absolutePath
+
+                val isVisible = allowedPaths.any { allowed ->
+                    childPath == allowed ||
+                            allowed.startsWith("$childPath/") ||
+                            childPath.startsWith("$allowed/")
+                }
+
+                if (isVisible) {
+                    val childUri = "${session.uri.removeSuffix("/")}/${child.name}"
+                    xml.append(getFilePropertiesXml(child, childUri))
+                }
             }
         }
+
         xml.append("</D:multistatus>")
         return newFixedLengthResponse(Response.Status.lookup(207), "application/xml; charset=utf-8", xml.toString())
     }

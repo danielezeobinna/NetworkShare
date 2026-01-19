@@ -1,6 +1,7 @@
 package com.example.networkshare
 
 import android.app.*
+import android.content.Context
 import android.content.Intent
 import android.os.IBinder
 import android.util.Log
@@ -11,6 +12,7 @@ import androidx.core.app.NotificationCompat
 import java.io.File
 import java.net.Inet4Address
 import java.net.NetworkInterface
+import androidx.core.content.edit
 
 data class FolderItem(
     val file: File,
@@ -32,7 +34,9 @@ class WebDAVService : Service() {
         }
 
         if (intent?.action == "REFRESH_INFO") {
-            broadcastCurrentAddresses()
+            if (activeServers.isNotEmpty()) {
+                broadcastCurrentAddresses()
+            }
             return START_STICKY
         }
 
@@ -109,50 +113,47 @@ class WebDAVService : Service() {
     }
 
     private fun startWebDAVServers() {
-        if (activeServers.isNotEmpty()) return
+        // 1. Stop all current servers before restarting
+        activeServers.forEach { it.stopServer() }
+        activeServers.clear()
 
-        val ip = getLocalIpAddress() ?: "127.0.0.1"
         var nextPort = 8080
         val maxPort = 8089
 
+        // 2. Get all physical storage roots (Internal, SD Card, USB)
         val externalDirs = getExternalFilesDirs(null)
-        val statusSummary = StringBuilder()
+        val roots = externalDirs.filterNotNull().map { dir ->
+            if (dir.absolutePath.contains("/Android/")) {
+                dir.absolutePath.split("/Android/")[0]
+            } else {
+                dir.absolutePath
+            }
+        }.distinct().map { File(it) }
 
-        externalDirs?.forEach { dir ->
-            if (dir != null && nextPort <= maxPort) {
-                val path = dir.absolutePath
+        // 3. Start one server per Storage Root IF it has selected folders
+        roots.forEach { root ->
+            // Find which selected paths belong to THIS specific root
+            val allowedInThisRoot = selectedPaths.filter { it.startsWith(root.absolutePath) }
 
-                val storageRootPath = if (path.contains("/Android/")) {
-                    path.split("/Android/")[0]
-                } else { path }
+            if (allowedInThisRoot.isNotEmpty() && nextPort <= maxPort) {
+                while (isPortBusy(nextPort) && nextPort <= maxPort) {
+                    nextPort++
+                }
 
-                val rootFile = File(storageRootPath)
-
-                if (rootFile.exists() && rootFile.canRead()) {
-
-                    while (isPortBusy(nextPort) && nextPort <= maxPort) {
+                if (nextPort <= maxPort) {
+                    try {
+                        // Pass the list of allowed paths to the server constructor
+                        activeServers.add(WebDAVServer(nextPort, root, this, allowedInThisRoot))
                         nextPort++
-                    }
-
-                    if (nextPort <= maxPort) {
-                        try {
-                            activeServers.add(WebDAVServer(nextPort, rootFile, this))
-
-                            val label = if (storageRootPath.contains("emulated/0")) "Internal" else rootFile.name
-                            statusSummary.append("$label: http://$ip:$nextPort/\n")
-
-                            nextPort++
-                        } catch (e: Exception) {
-                            Log.e(tag, "Failed to start server for $storageRootPath: ${e.message}")
-                        }
+                    } catch (e: Exception) {
+                        Log.e(tag, "Failed to start server for ${root.absolutePath}: ${e.message}")
                     }
                 }
             }
         }
 
-        val intent = Intent("com.example.networkshare.ADDRESSES_UPDATED")
-        intent.putExtra("address_list", statusSummary.toString().trim())
-        sendBroadcast(intent)
+        // 4. Update the addresses on the main screen
+        broadcastCurrentAddresses()
     }
 
     private fun isPortBusy(port: Int): Boolean {
@@ -167,23 +168,46 @@ class WebDAVService : Service() {
         val ip = getLocalIpAddress() ?: "127.0.0.1"
         val statusSummary = StringBuilder()
 
+        if (activeServers.isEmpty()) {
+            statusSummary.append("No folders selected.\nGo to 'Choose Shared Paths' to start.")
+        }
+
+        data class AddressItem(val label: String, val folderName: String, val url: String, val isStorage: Boolean)
+
+        val addressList = mutableListOf<AddressItem>()
+
         activeServers.forEach { server ->
-            val path = server.rootDirectory.absolutePath
-            val name = server.rootDirectory.name
+            val rootPath = server.rootDirectory.absolutePath
 
-            val label = when {
-                path.contains("emulated/0") -> "Internal Storage"
-
-                path.lowercase().contains("usb") -> "USB OTG ($name)"
-
-                else -> "SD Card ($name)"
+            val storageLabel = when {
+                rootPath.contains("emulated/0") -> "Internal Storage"
+                rootPath.lowercase().contains("usb") -> "USB OTG (${server.rootDirectory.name})"
+                else -> "SD Card (${server.rootDirectory.name})"
             }
 
-            statusSummary.append("$label:\nhttp://$ip:${server.port}/\n\n")
+            selectedPaths.filter { it.startsWith(rootPath) }.forEach { path ->
+                val folder = File(path)
+                val isRoot = path == rootPath
+                val relativePath = path.removePrefix(rootPath).trimStart('/')
+
+                addressList.add(AddressItem(
+                    label = storageLabel,
+                    folderName = folder.name,
+                    url = "http://$ip:${server.port}/$relativePath",
+                    isStorage = isRoot
+                ))
+            }
+        }
+
+        addressList.sortWith(compareByDescending<AddressItem> { it.isStorage }.thenBy { it.folderName.lowercase() })
+
+        addressList.forEach { item ->
+            val displayName = if (item.isStorage) item.label else item.folderName
+            statusSummary.append("$displayName:\n${item.url}\n\n")
         }
 
         val intent = Intent("com.example.networkshare.ADDRESSES_UPDATED")
-        intent.putExtra("address_list", statusSummary.toString().trim())
+        intent.putExtra("address_list", statusSummary.toString().trim().ifEmpty { "No folders selected." })
         sendBroadcast(intent)
     }
 
@@ -230,16 +254,36 @@ class WebDAVService : Service() {
     }
 
     companion object {
-        var scannedItems = mutableStateListOf<FolderItem>() // Changed from File to FolderItem
+        var scannedItems = mutableStateListOf<FolderItem>()
         var isScanning = mutableStateOf(false)
         var selectedPaths = mutableStateListOf<String>()
+        val activeServers = mutableListOf<WebDAVServer>()
 
-        fun toggleSelection(path: String) {
+        fun savePaths(context: Context) {
+            val prefs = context.getSharedPreferences("network_share_prefs", MODE_PRIVATE)
+            prefs.edit{
+                putStringSet("shared_paths", selectedPaths.toSet())
+            }
+        }
+
+        fun loadPaths(context: Context) {
+            val prefs = context.getSharedPreferences("network_share_prefs", MODE_PRIVATE)
+            val saved = prefs.getStringSet("shared_paths", emptySet())
+            selectedPaths.clear()
+            selectedPaths.addAll(saved ?: emptySet())
+        }
+
+        fun toggleSelection(context: Context, path: String) {
+            val parentPath = selectedPaths.firstOrNull { path.startsWith("$it/") && path != it }
+
+            if (parentPath != null) return
+
             if (selectedPaths.contains(path)) {
                 selectedPaths.remove(path)
             } else {
                 selectedPaths.add(path)
             }
+            savePaths(context)
         }
 
         fun requestFolderScan(directory: File?) {
@@ -248,12 +292,10 @@ class WebDAVService : Service() {
 
             Thread {
                 try {
-                    // ALL DISK ACTIVITY HAPPENS HERE IN THE BACKGROUND
                     val items = directory.listFiles()?.filter { it.isDirectory }?.map {
                         FolderItem(
                             file = it,
                             name = it.name,
-                            // Pre-calculate this so the UI doesn't lag!
                             hasSubFolders = it.listFiles()?.any { sub -> sub.isDirectory } ?: false
                         )
                     } ?: emptyList()
