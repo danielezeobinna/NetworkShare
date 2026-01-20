@@ -34,9 +34,10 @@ class WebDAVService : Service() {
         }
 
         if (intent?.action == "REFRESH_INFO") {
-            if (activeServers.isNotEmpty()) {
-                broadcastCurrentAddresses()
+            if (activeServers.isEmpty() && selectedPaths.isNotEmpty()) {
+                startWebDAVServers()
             }
+            broadcastCurrentAddresses()
             return START_STICKY
         }
 

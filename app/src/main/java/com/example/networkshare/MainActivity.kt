@@ -44,6 +44,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import java.io.File // Fixes 'File' errors
 import androidx.compose.foundation.shape.RoundedCornerShape // Fixes 'RoundedCornerShape'
 import androidx.compose.foundation.lazy.items // Fixes the 'items' list error
+import androidx.compose.ui.platform.LocalContext
 
 class MainActivity : ComponentActivity() {
 
@@ -244,6 +245,14 @@ fun DiscoveryScreen(
     modifier: Modifier = Modifier
 ) {
     val isDark = isSystemInDarkTheme()
+    val context = LocalContext.current
+
+    LaunchedEffect(Unit) {
+        val intent = Intent(context, WebDAVService::class.java).apply {
+            action = "REFRESH_INFO"
+        }
+        context.startService(intent)
+    }
 
     Column(
         modifier = modifier
@@ -251,7 +260,7 @@ fun DiscoveryScreen(
             .statusBarsPadding()
             .padding(24.dp)
     ) {
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(24.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -261,12 +270,13 @@ fun DiscoveryScreen(
                 Text(
                     text = "Network discovery",
                     fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
                     fontSize = 20.sp
                 )
                 Text(
                     text = "Your phone can be accessed by your PC on the network",
                     fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.onSurface,
                     lineHeight = 18.sp
                 )
             }
@@ -351,7 +361,7 @@ fun DiscoveryScreen(
 
 @Composable
 fun FilePickerSection(onBack: () -> Unit) {
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
     val activity = context as MainActivity
     var currentPath by remember { mutableStateOf<File?>(null) }
 
@@ -393,60 +403,74 @@ fun FilePickerSection(onBack: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding()
-            .padding(24.dp)
     ) {
-        Text(
-            text = currentPath?.name ?: "Storage & Folders",
-            color = Color.White,
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold
-        )
-
-        if (currentPath != null) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(24.dp)
+        ) {
             Text(
-                text = currentPath!!.absolutePath,
-                color = Color.Gray,
-                fontSize = 12.sp,
-                maxLines = 1
+                text = if (currentPath == null) "Storage & Folders" else currentPath!!.name,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold
             )
+
+            currentPath?.let {
+                Text(
+                    text = it.absolutePath,
+                    color = Color.Gray,
+                    fontSize = 12.sp,
+                    maxLines = 1
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(32.dp))
 
-        LazyColumn(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .graphicsLayer(alpha = if (isLoading) 0.5f else 1f),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+                .background(
+                    color = MaterialTheme.colorScheme.surfaceVariant
+                )
         ) {
-            items(itemsToShow, key = { it.file.absolutePath }) { folderItem ->
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer(alpha = if (isLoading) 0.5f else 1f),
+                contentPadding = PaddingValues(horizontal = 24.dp, vertical = 32.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(itemsToShow, key = { it.file.absolutePath }) { folderItem ->
 
-                val isStorageRoot = currentPath == null
+                    val isStorageRoot = currentPath == null
 
-                val label = remember(folderItem, currentPath) {
-                    if (isStorageRoot && folderItem.file.absolutePath.contains("emulated/0")) {
-                        "Internal Storage"
-                    } else if (isStorageRoot) {
-                        "SD Card (${folderItem.name})"
-                    } else {
-                        folderItem.name
-                    }
-                }
-
-                StorageRow(
-                    name = label,
-                    path = if (currentPath == null) folderItem.file.absolutePath else "Folder",
-                    fullPath = folderItem.file.absolutePath,
-                    onClick = {
-                        if (folderItem.hasSubFolders || isStorageRoot) {
-                            currentPath = folderItem.file
+                    val label = remember(folderItem, currentPath) {
+                        if (isStorageRoot && folderItem.file.absolutePath.contains("emulated/0")) {
+                            "Internal Storage"
+                        } else if (isStorageRoot) {
+                            "SD Card (${folderItem.name})"
                         } else {
-                            Toast.makeText(context, "No sub-folders inside", Toast.LENGTH_SHORT).show()
+                            folderItem.name
                         }
                     }
-                )
+
+                    StorageRow(
+                        name = label,
+                        path = if (currentPath == null) folderItem.file.absolutePath else "Folder",
+                        fullPath = folderItem.file.absolutePath,
+                        onClick = {
+                            if (folderItem.hasSubFolders || isStorageRoot) {
+                                currentPath = folderItem.file
+                            } else {
+                                Toast.makeText(context, "No sub-folders inside", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    )
+                }
             }
         }
     }
@@ -459,7 +483,7 @@ fun StorageRow(
     fullPath: String,
     onClick: () -> Unit
 ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
     val isChecked = remember(fullPath, WebDAVService.selectedPaths.size) {
         WebDAVService.selectedPaths.contains(fullPath)
     }
@@ -483,19 +507,25 @@ fun StorageRow(
             .padding(vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .background(Color(0xFF1A1A1A), RoundedCornerShape(8.dp)),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(if (path == "Folder") "📁" else "💾", fontSize = 20.sp)
-        }
+        Text(
+            text = if (path == "Folder") "📁" else "💾",
+            fontSize = 24.sp,
+            modifier = Modifier.padding(end = 16.dp)
+        )
 
         Spacer(modifier = Modifier.width(16.dp))
 
         Column(modifier = Modifier.weight(1f)) {
-            Text(text = name, color = if (isInherited) Color.Gray else Color.White, fontSize = 16.sp)
+            Text(
+                text = name,
+                color = if (isInherited) Color.Gray else MaterialTheme.colorScheme.onSurface,
+                fontSize = 16.sp
+            )
+            HorizontalDivider(
+                modifier = Modifier.padding(top = 8.dp),
+                thickness = 0.5.dp,
+                color = Color.Gray.copy(alpha = 0.3f)
+            )
         }
 
         // THE VLC CHECKBOX
@@ -527,7 +557,16 @@ fun StorageRow(
                 }
         ) {
             if (isChecked || isInherited) {
-                Text("✓", color = if (isInherited) Color.DarkGray else Color.Black, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text(
+                    text = "✓",
+                    color = if (isInherited) {
+                        if (isSystemInDarkTheme()) Color.Gray else Color.LightGray
+                    } else {
+                        if (isSystemInDarkTheme()) Color.Black else Color.White
+                    },
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
+                )
             } else if (isPartiallyChecked) {
                 Box(modifier = Modifier.size(10.dp).background(Color(0xFF2BAED5), RoundedCornerShape(2.dp)))
             }
