@@ -308,7 +308,8 @@ class WebDAVServer(
                 }
 
                 if (isVisible) {
-                    val childUri = "${session.uri.removeSuffix("/")}/${child.name}"
+                    val baseUri = session.uri.removeSuffix("/")
+                    val childUri = "$baseUri/${child.name}"
                     xml.append(getFilePropertiesXml(child, childUri))
                 }
             }
@@ -321,20 +322,32 @@ class WebDAVServer(
     private fun getFilePropertiesXml(file: File, uri: String): String {
         val isDir = file.isDirectory
         val sdf = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss z", Locale.US).apply { timeZone = TimeZone.getTimeZone("GMT") }
+
+        val safeDisplayName = file.name
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\"", "&quot;")
+            .replace("'", "&apos;")
+
+        val safeUri = uri.split("/").joinToString("/") { segment ->
+            java.net.URLEncoder.encode(segment, "UTF-8").replace("+", "%20")
+        }
+
         return """
-            <D:response>
-                <D:href>$uri</D:href>
-                <D:propstat>
-                    <D:prop>
-                        <D:displayname>${file.name}</D:displayname>
-                        <D:getcontentlength>${if (isDir) 0 else file.length()}</D:getcontentlength>
-                        <D:resourcetype>${if (isDir) "<D:collection/>" else ""}</D:resourcetype>
-                        <D:getlastmodified>${sdf.format(Date(file.lastModified()))}</D:getlastmodified>
-                    </D:prop>
-                    <D:status>HTTP/1.1 200 OK</D:status>
-                </D:propstat>
-            </D:response>
-        """.trimIndent()
+        <D:response>
+            <D:href>$safeUri</D:href>
+            <D:propstat>
+                <D:prop>
+                    <D:displayname>$safeDisplayName</D:displayname>
+                    <D:getcontentlength>${if (isDir) 0 else file.length()}</D:getcontentlength>
+                    <D:resourcetype>${if (isDir) "<D:collection/>" else ""}</D:resourcetype>
+                    <D:getlastmodified>${sdf.format(Date(file.lastModified()))}</D:getlastmodified>
+                </D:prop>
+                <D:status>HTTP/1.1 200 OK</D:status>
+            </D:propstat>
+        </D:response>
+    """.trimIndent()
     }
 
     fun stopServer() = stop()
