@@ -44,6 +44,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import java.io.File // Fixes 'File' errors
 import androidx.compose.foundation.shape.RoundedCornerShape // Fixes 'RoundedCornerShape'
 import androidx.compose.foundation.lazy.items // Fixes the 'items' list error
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.platform.LocalContext
 
 class MainActivity : ComponentActivity() {
@@ -340,21 +342,37 @@ fun DiscoveryScreen(
         Surface(
             tonalElevation = 4.dp,
             shape = MaterialTheme.shapes.medium,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 150.dp),
             color = if (isOn) MaterialTheme.colorScheme.surfaceVariant
             else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
         ) {
-            Text(
-                text = addresses,
-                modifier = Modifier
-                    .padding(16.dp)
-                    .graphicsLayer(alpha = if (isOn) 1f else 0.5f),
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 14.sp,
-                color = if (isOn) MaterialTheme.colorScheme.onSurface
-                else Color.Gray
-            )
+            SelectionContainer {
+                LazyColumn(
+                    modifier = Modifier
+                        .padding(16.dp)
+                        .graphicsLayer(alpha = if (isOn) 1f else 0.5f)
+                ) {
+                    val addressList = addresses.split("\n").filter { it.isNotBlank() }
+
+                    itemsIndexed(addressList) { _, address ->
+                        val isUrl = address.startsWith("http")
+
+                        Text(
+                            text = address,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 14.sp,
+                            color = if (isOn) MaterialTheme.colorScheme.onSurface else Color.Gray,
+                            modifier = Modifier.padding(
+                                bottom = if (isUrl) 16.dp else 2.dp,
+                                top = 2.dp
+                            )
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -515,7 +533,11 @@ fun StorageRow(
 
         Spacer(modifier = Modifier.width(16.dp))
 
-        Column(modifier = Modifier.weight(1f)) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 16.dp)
+        ) {
             Text(
                 text = name,
                 color = if (isInherited) Color.Gray else MaterialTheme.colorScheme.onSurface,
@@ -528,7 +550,6 @@ fun StorageRow(
             )
         }
 
-        // THE VLC CHECKBOX
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier

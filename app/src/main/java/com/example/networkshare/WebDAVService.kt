@@ -114,14 +114,12 @@ class WebDAVService : Service() {
     }
 
     private fun startWebDAVServers() {
-        // 1. Stop all current servers before restarting
         activeServers.forEach { it.stopServer() }
         activeServers.clear()
 
         var nextPort = 8080
         val maxPort = 8089
 
-        // 2. Get all physical storage roots (Internal, SD Card, USB)
         val externalDirs = getExternalFilesDirs(null)
         val roots = externalDirs.filterNotNull().map { dir ->
             if (dir.absolutePath.contains("/Android/")) {
@@ -131,9 +129,7 @@ class WebDAVService : Service() {
             }
         }.distinct().map { File(it) }
 
-        // 3. Start one server per Storage Root IF it has selected folders
         roots.forEach { root ->
-            // Find which selected paths belong to THIS specific root
             val allowedInThisRoot = selectedPaths.filter { it.startsWith(root.absolutePath) }
 
             if (allowedInThisRoot.isNotEmpty() && nextPort <= maxPort) {
@@ -143,7 +139,6 @@ class WebDAVService : Service() {
 
                 if (nextPort <= maxPort) {
                     try {
-                        // Pass the list of allowed paths to the server constructor
                         activeServers.add(WebDAVServer(nextPort, root, this, allowedInThisRoot))
                         nextPort++
                     } catch (e: Exception) {
@@ -153,7 +148,6 @@ class WebDAVService : Service() {
             }
         }
 
-        // 4. Update the addresses on the main screen
         broadcastCurrentAddresses()
     }
 
