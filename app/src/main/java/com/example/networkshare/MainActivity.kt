@@ -40,11 +40,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.painterResource
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import java.io.File // Fixes 'File' errors
 import androidx.compose.foundation.shape.RoundedCornerShape // Fixes 'RoundedCornerShape'
 import androidx.compose.foundation.lazy.items // Fixes the 'items' list error
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.platform.LocalContext
 
@@ -383,6 +385,16 @@ fun FilePickerSection(onBack: () -> Unit) {
     val activity = context as MainActivity
     var currentPath by remember { mutableStateOf<File?>(null) }
 
+    val pathParts = remember(currentPath) {
+        val parts = mutableListOf<File>()
+        var temp = currentPath
+        while (temp != null) {
+            parts.add(0, temp)
+            temp = temp.parentFile
+        }
+        parts
+    }
+
     val itemsToShow = WebDAVService.scannedItems.sortedBy { it.name.lowercase() }
     val isLoading = WebDAVService.isScanning.value
 
@@ -419,34 +431,94 @@ fun FilePickerSection(onBack: () -> Unit) {
     }
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .statusBarsPadding()
+        modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding()
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(24.dp)
-        ) {
-            Text(
-                text = if (currentPath == null) "Storage & Folders" else currentPath!!.name,
-                color = MaterialTheme.colorScheme.onSurface,
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold
-            )
+        // 1. Create the ScrollState outside the row to control it
+        val breadcrumbScrollState = rememberScrollState()
 
-            currentPath?.let {
-                Text(
-                    text = it.absolutePath,
-                    color = Color.Gray,
-                    fontSize = 12.sp,
-                    maxLines = 1
-                )
+        fun formatBreadcrumbName(name: String): String {
+            if (name.length > 15) {
+                return name.take(6) + "..." + name.takeLast(6)
             }
+            return name
+        }
+
+// 2. Auto-scroll to the end whenever the path changes
+        LaunchedEffect(pathParts.size) {
+            breadcrumbScrollState.animateScrollTo(breadcrumbScrollState.maxValue)
         }
 
         Spacer(modifier = Modifier.height(32.dp))
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp) // Added more top/bottom padding
+        ) {
+            // Back Button (<)
+            IconButton(
+                onClick = {
+                    // This triggers the same logic as your BackHandler
+                    if (currentPath == null) onBack() else {
+                        val storages = activity.getAvailableStorages()
+                        currentPath = if (storages.any { it.absolutePath == currentPath?.absolutePath }) null else currentPath?.parentFile
+                    }
+                },
+                modifier = Modifier.size(32.dp).offset(x = (-8).dp)
+            ) {
+                Text("<", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+            }
+
+            // Increased gap to "bring the breadcrumb list down more"
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                // FIXED ICON (ic_sp)
+                Image(
+                    painter = painterResource(id = R.drawable.ic_sp),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(26.dp)
+                        .clickable { currentPath = null }
+                )
+
+                // The Scrollable Path
+                Row(
+                    modifier = Modifier
+                        .padding(start = 8.dp)
+                        .horizontalScroll(breadcrumbScrollState),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    pathParts.forEachIndexed { index, file ->
+                        val rawName = when {
+                            file.absolutePath.endsWith("emulated/0") -> "Internal"
+                            file.absolutePath.startsWith("/storage/") && file.parentFile?.path == "/storage" -> {
+                                if (file.name.contains("-")) "SD Card" else "USB"
+                            }
+                            else -> file.name
+                        }
+
+                        // Skip showing segments like "storage" or "emulated"
+                        // only if they are just parents of the actual storage roots
+                        if (file.path != "/storage" && file.path != "/storage/emulated") {
+                            Text("  >  ", color = Color(0xFF666660), fontSize = 14.sp)
+                            Text(
+                                text = formatBreadcrumbName(rawName),
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (index == pathParts.size - 1) MaterialTheme.colorScheme.onSurface else Color.Gray,
+                                modifier = Modifier.clickable { currentPath = file }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
 
         Box(
             modifier = Modifier
@@ -458,7 +530,7 @@ fun FilePickerSection(onBack: () -> Unit) {
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
-                    .graphicsLayer(alpha = if (isLoading) 0.5f else 1f),
+                    .graphicsLayer(alpha = if (isLoading) 0f else 1f),
                 contentPadding = PaddingValues(horizontal = 24.dp, vertical = 32.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -512,6 +584,10 @@ fun StorageRow(
         }
     }
 
+    val inheritedColor = if (isSystemInDarkTheme()) Color.Gray else Color.LightGray
+
+    val inheritedCheck = if (isSystemInDarkTheme()) Color.LightGray else Color.White
+
     val isPartiallyChecked = remember(fullPath, WebDAVService.selectedPaths.size) {
         !isChecked && !isInherited && WebDAVService.selectedPaths.any { shared ->
             shared.startsWith("$fullPath/") && shared != fullPath
@@ -525,10 +601,14 @@ fun StorageRow(
             .padding(vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            text = if (path == "Folder") "📁" else "💾",
-            fontSize = 24.sp,
-            modifier = Modifier.padding(end = 16.dp)
+        Image(
+            painter = painterResource(
+                id = if (path == "Folder") R.drawable.ic_folder else R.drawable.ic_drive
+            ),
+            contentDescription = null,
+            modifier = Modifier
+                .padding(end = 16.dp)
+                .offset(y = (-4).dp)
         )
 
         Spacer(modifier = Modifier.width(16.dp))
@@ -544,7 +624,9 @@ fun StorageRow(
                 fontSize = 16.sp
             )
             HorizontalDivider(
-                modifier = Modifier.padding(top = 8.dp),
+                modifier = Modifier
+                    .offset(y = (4).dp)
+                    .padding(top = 8.dp),
                 thickness = 0.5.dp,
                 color = Color.Gray.copy(alpha = 0.3f)
             )
@@ -555,13 +637,16 @@ fun StorageRow(
             modifier = Modifier
                 .size(28.dp)
                 .padding(4.dp)
+                .offset(y = (-4).dp)
                 .border(
                     2.dp,
-                    if (isChecked || isPartiallyChecked || isInherited) Color(0xFF2BAED5) else Color.Gray,
+                    if (isInherited) inheritedColor
+                    else if (isChecked || isPartiallyChecked) Color(0xFF2BAED5) else Color.Gray,
                     RoundedCornerShape(6.dp)
                 )
                 .background(
-                    if (isChecked || isInherited) Color(0xFF2BAED5) else Color.Transparent,
+                    if (isInherited) inheritedColor
+                    else if (isChecked) Color(0xFF2BAED5) else Color.Transparent,
                     RoundedCornerShape(6.dp)
                 )
                 .clickable {
@@ -580,13 +665,9 @@ fun StorageRow(
             if (isChecked || isInherited) {
                 Text(
                     text = "✓",
-                    color = if (isInherited) {
-                        if (isSystemInDarkTheme()) Color.Gray else Color.LightGray
-                    } else {
-                        if (isSystemInDarkTheme()) Color.Black else Color.White
-                    },
+                    color = if (isInherited) inheritedCheck else if (isSystemInDarkTheme()) Color.Black else Color.White,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp
+                    fontSize = 14.sp,
                 )
             } else if (isPartiallyChecked) {
                 Box(modifier = Modifier.size(10.dp).background(Color(0xFF2BAED5), RoundedCornerShape(2.dp)))
