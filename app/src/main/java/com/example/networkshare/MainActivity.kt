@@ -42,9 +42,9 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
-import java.io.File // Fixes 'File' errors
-import androidx.compose.foundation.shape.RoundedCornerShape // Fixes 'RoundedCornerShape'
-import androidx.compose.foundation.lazy.items // Fixes the 'items' list error
+import java.io.File
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -201,6 +201,15 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun toggleService(start: Boolean) {
+        if (start) {
+            if (!isNetworkAvailable()) {
+                Toast.makeText(this, "Turn on WiFi or Hotspot first", Toast.LENGTH_SHORT).show()
+                isDiscoveryOn = false
+                isPending = false
+                return
+            }
+        }
+
         val intent = Intent(this, WebDAVService::class.java)
         try {
             if (start) {
@@ -219,6 +228,24 @@ class MainActivity : ComponentActivity() {
     private fun updateAddresses() {
         if (isDiscoveryOn && serverAddresses.contains("0.0.0.0")) {
             serverAddresses = "Scanning storages..."
+        }
+    }
+
+    private fun isNetworkAvailable(): Boolean {
+        return try {
+            val interfaces = java.net.NetworkInterface.getNetworkInterfaces().toList()
+
+            interfaces.any { intf ->
+
+                intf.isUp && !intf.isLoopback && (
+                        intf.name.contains("wlan") ||
+                                intf.name.contains("ap") ||
+                                intf.name.contains("softap") ||
+                                intf.name.contains("rndis")
+                        )
+            }
+        } catch (_: Exception) {
+            false
         }
     }
 

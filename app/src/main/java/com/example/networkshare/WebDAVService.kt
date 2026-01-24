@@ -41,6 +41,12 @@ class WebDAVService : Service() {
             return START_STICKY
         }
 
+        if (!isNetworkAvailable()) {
+            android.widget.Toast.makeText(this, "WiFi or Hotspot required to start", android.widget.Toast.LENGTH_SHORT).show()
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
         createNotificationChannel()
 
         val contentIntent = Intent(this, MainActivity::class.java).apply {
@@ -116,6 +122,12 @@ class WebDAVService : Service() {
     private fun startWebDAVServers() {
         activeServers.forEach { it.stopServer() }
         activeServers.clear()
+
+        if (!isNetworkAvailable()) {
+            sendBroadcast(Intent("com.example.networkshare.SERVER_STOPPED"))
+            stopSelf()
+            return
+        }
 
         var nextPort = 8080
         val maxPort = 8089
@@ -214,6 +226,24 @@ class WebDAVService : Service() {
                 .firstOrNull { !it.isLoopbackAddress }
                 ?.hostAddress
         } catch (_: Exception) { null }
+    }
+
+    private fun isNetworkAvailable(): Boolean {
+        return try {
+            val interfaces = NetworkInterface.getNetworkInterfaces().toList()
+
+            interfaces.any { intf ->
+
+                intf.isUp && !intf.isLoopback && (
+                        intf.name.contains("wlan") ||
+                                intf.name.contains("ap") ||
+                                intf.name.contains("softap") ||
+                                intf.name.contains("rndis")
+                        )
+            }
+        } catch (_: Exception) {
+            false
+        }
     }
 
     override fun onDestroy() {
