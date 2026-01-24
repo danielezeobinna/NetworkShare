@@ -26,6 +26,27 @@ class WebDAVService : Service() {
     private val channelId = "WebDAV_Service_Channel"
     private val tag = "WebDAVService"
     private val safetyChannelId = "WebDAV_Safety_Alerts"
+    private val networkHardwareReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val action = intent?.action
+
+            // This handles Hotspot toggle
+            if (action == "android.net.wifi.WIFI_AP_STATE_CHANGED") {
+                val state = intent.getIntExtra("wifi_state", 11)
+                if (state == 11 || state == 14) {
+                    verifyAndStop()
+                }
+            }
+
+            // This handles WiFi toggle
+            if (action == android.net.wifi.WifiManager.WIFI_STATE_CHANGED_ACTION) {
+                val state = intent.getIntExtra(android.net.wifi.WifiManager.EXTRA_WIFI_STATE, 1)
+                if (state == android.net.wifi.WifiManager.WIFI_STATE_DISABLED) {
+                    verifyAndStop()
+                }
+            }
+        }
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "STOP_SERVICE") {
@@ -73,7 +94,7 @@ class WebDAVService : Service() {
 
         val notification = NotificationCompat.Builder(this, channelId)
             .setSmallIcon(R.drawable.ic_stat_name)
-            .setContentTitle("Network discovery is turned on")
+            .setContentTitle("Network sharing is turned on")
             .setContentText("Your phone can be accessed by your PC")
             .setOngoing(true)
             .setColor("#2BAED5".toColorInt())
@@ -82,6 +103,11 @@ class WebDAVService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
 
+        val filter = android.content.IntentFilter().apply {
+            addAction("android.net.wifi.WIFI_AP_STATE_CHANGED")
+            addAction(android.net.wifi.WifiManager.WIFI_STATE_CHANGED_ACTION)
+        }
+        registerReceiver(networkHardwareReceiver, filter)
         startForeground(1, notification)
 
         startWebDAVServers()
@@ -237,8 +263,7 @@ class WebDAVService : Service() {
                 intf.isUp && !intf.isLoopback && (
                         intf.name.contains("wlan") ||
                                 intf.name.contains("ap") ||
-                                intf.name.contains("softap") ||
-                                intf.name.contains("rndis")
+                                intf.name.contains("softap")
                         )
             }
         } catch (_: Exception) {
@@ -246,8 +271,27 @@ class WebDAVService : Service() {
         }
     }
 
+    private fun verifyAndStop() {
+        // Wait 1.5 seconds for the hardware to settle
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            val currentIp = getLocalIpAddress()
+            val hardwareActive = isNetworkAvailable()
+
+            // If no hardware is on, or the IP is gone/local, stop the service
+            if (!hardwareActive || currentIp == null || currentIp == "127.0.0.1") {
+            Log.d(tag, "Strong check failed. Hardware Active: $hardwareActive, IP: $currentIp")
+            stopSelf()
+        }
+        }, 1500)
+    }
+
     override fun onDestroy() {
         Log.d(tag, "Service stopping, cleaning up servers...")
+        try {
+            unregisterReceiver(networkHardwareReceiver)
+        } catch (e: Exception) {
+            Log.e(tag, "Receiver was not registered: ${e.message}")
+        }
         activeServers.forEach { it.stopServer() }
         activeServers.clear()
         sendBroadcast(Intent("com.example.networkshare.SERVER_STOPPED"))
@@ -261,7 +305,7 @@ class WebDAVService : Service() {
 
         val discoveryChannel = NotificationChannel(
             channelId,
-            "Network Discovery",
+            "Network Sharing",
             NotificationManager.IMPORTANCE_LOW
         )
         manager?.createNotificationChannel(discoveryChannel)
