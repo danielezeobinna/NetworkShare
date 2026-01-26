@@ -414,16 +414,25 @@ fun DiscoveryScreen(
         if (showNetworkDialog) {
             Dialog(
                 onDismissRequest = { showNetworkDialog = false },
-                properties = DialogProperties(usePlatformDefaultWidth = false)
+                properties = DialogProperties(
+                    usePlatformDefaultWidth = false,
+                    dismissOnBackPress = true,
+                    dismissOnClickOutside = true
+                )
             ) {
                 Box(
-                    modifier = Modifier.fillMaxSize(1f),
-                    contentAlignment = Alignment.Center // Start at the top
+                    modifier = Modifier
+                        .fillMaxSize(0.98f)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) { showNetworkDialog = false },
+                    contentAlignment = Alignment.Center
                 ) {
                     Surface(
                         modifier = Modifier
                             .offset(y = (-24).dp)
-                            .fillMaxWidth(0.98f)
+                            .fillMaxWidth(0.95f)
                             .padding(horizontal = 4.dp),
                         shape = RoundedCornerShape(28.dp),
                         color = if (isSystemInDarkTheme()) Color(0xFF252525) else Color(0xFFFCFCFC),
@@ -443,7 +452,7 @@ fun DiscoveryScreen(
                             Spacer(modifier = Modifier.height(16.dp))
 
                             Text(
-                                text = "You need to be connected to Wi-Fi or have your Hotspot active to share folders.",
+                                text = "Network sharing is only possible when your device is part of a network. Join a Wi-Fi network or create a network using hotspot.",
                                 fontSize = 16.sp,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
