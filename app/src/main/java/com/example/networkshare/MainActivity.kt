@@ -41,6 +41,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.lazy.LazyColumn
 import java.io.File
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -49,12 +50,15 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 
 class MainActivity : ComponentActivity() {
 
     private var serverAddresses by mutableStateOf("Internal Storage:\nhttp://0.0.0.0:8080/")
     private var isDiscoveryOn by mutableStateOf(false)
     private var isPending by mutableStateOf(false)
+    private var showNetworkDialog by mutableStateOf(false)
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -67,7 +71,7 @@ class MainActivity : ComponentActivity() {
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) toggleService(true)
+        if (granted) toggleService(true) { showNetworkDialog = true }
     }
 
     private val receiver = object : BroadcastReceiver() {
@@ -128,7 +132,7 @@ class MainActivity : ComponentActivity() {
                             isOn = isDiscoveryOn,
                             isPending = isPending,
                             addresses = serverAddresses,
-                            onToggle = { start -> handleToggle(start) },
+                            onToggle = { start, showDialog -> handleToggle(start, showDialog) },
                             onOpenPicker = { isPickerOpen.value = true }
                         )
                     } else {
@@ -182,13 +186,13 @@ class MainActivity : ComponentActivity() {
         serverAddresses = saved ?: "Internal Storage:\nhttp://0.0.0.0:8080/"
     }
 
-    private fun handleToggle(start: Boolean) {
+    private fun handleToggle(start: Boolean, onShowDialog: () -> Unit) {
         if (isPending) return
         isPending = true
         if (start && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {
-            toggleService(start)
+            toggleService(start, onShowDialog)
         }
     }
 
@@ -200,10 +204,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun toggleService(start: Boolean) {
+    private fun toggleService(start: Boolean, onShowDialog: () -> Unit) {
         if (start) {
             if (!isNetworkAvailable()) {
-                Toast.makeText(this, "Turn on WiFi or Hotspot first", Toast.LENGTH_SHORT).show()
+                onShowDialog()
+                showNetworkDialog = true
                 isDiscoveryOn = false
                 isPending = false
                 return
@@ -271,12 +276,14 @@ fun DiscoveryScreen(
     isOn: Boolean,
     isPending: Boolean,
     addresses: String,
-    onToggle: (Boolean) -> Unit,
+    onToggle: (Boolean, () -> Unit) -> Unit,
     onOpenPicker: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val isDark = isSystemInDarkTheme()
     val context = LocalContext.current
+
+    var showNetworkDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         val intent = Intent(context, WebDAVService::class.java).apply {
@@ -299,7 +306,7 @@ fun DiscoveryScreen(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Network discovery",
+                    text = "Network Share",
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,
                     fontSize = 20.sp
@@ -314,7 +321,7 @@ fun DiscoveryScreen(
 
             Switch(
                 checked = isOn,
-                onCheckedChange = { onToggle(it) },
+                onCheckedChange = { onToggle(it) { showNetworkDialog = true } },
                 enabled = !isPending,
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = if (isDark) Color.Black else Color.White,
@@ -399,6 +406,106 @@ fun DiscoveryScreen(
                                 top = 2.dp
                             )
                         )
+                    }
+                }
+            }
+        }
+
+        if (showNetworkDialog) {
+            Dialog(
+                onDismissRequest = { showNetworkDialog = false },
+                properties = DialogProperties(usePlatformDefaultWidth = false)
+            ) {
+                Box(
+                    modifier = Modifier.fillMaxSize(1f),
+                    contentAlignment = Alignment.Center // Start at the top
+                ) {
+                    Surface(
+                        modifier = Modifier
+                            .offset(y = (-24).dp)
+                            .fillMaxWidth(0.98f)
+                            .padding(horizontal = 4.dp),
+                        shape = RoundedCornerShape(28.dp),
+                        color = if (isSystemInDarkTheme()) Color(0xFF252525) else Color(0xFFFCFCFC),
+                        tonalElevation = 6.dp
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(24.dp),
+                            horizontalAlignment = Alignment.Start
+                        ) {
+                            Text(
+                                text = "No Network Detected",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 20.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            Text(
+                                text = "You need to be connected to Wi-Fi or have your Hotspot active to share folders.",
+                                fontSize = 16.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+
+                            Spacer(modifier = Modifier.height(24.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // LEFT BUTTON (Hotspot)
+                                TextButton(
+                                    onClick = {
+                                        showNetworkDialog = false
+                                        val intent = Intent("android.settings.TETHER_SETTINGS")
+                                        try { context.startActivity(intent) } catch (_: Exception) {
+                                            context.startActivity(Intent(Settings.ACTION_WIRELESS_SETTINGS))
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        // We use clickable here to force the custom ripple color
+                                        .clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = ripple(color = Color.DarkGray), // Your dark gray ripple
+                                            onClick = { /* This is handled by the TextButton's onClick */ }
+                                        )
+                                ) {
+                                    Text("Hotspot", color = Color(0xFF2BAED5), fontSize = 16.sp)
+                                }
+
+                                // THE DIVIDER LINE (The subtle line you wanted)
+                                VerticalDivider(
+                                    modifier = Modifier
+                                        .height(20.dp)
+                                        .width(1.dp),
+                                    color = Color.Gray.copy(alpha = 0.2f)
+                                )
+
+                                // RIGHT BUTTON (Wi-Fi)
+                                TextButton(
+                                    onClick = {
+                                        showNetworkDialog = false
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                            context.startActivity(Intent("android.settings.panel.action.WIFI"))
+                                        } else {
+                                            context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = ripple(color = Color.DarkGray), // Your dark gray ripple
+                                            onClick = { /* This is handled by the TextButton's onClick */ }
+                                        )
+                                ) {
+                                    Text("Wi-Fi", color = Color(0xFF2BAED5), fontSize = 16.sp)
+                                }
+                            }
+                        }
                     }
                 }
             }
