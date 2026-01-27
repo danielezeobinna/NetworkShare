@@ -205,13 +205,18 @@ class WebDAVService : Service() {
             statusSummary.append("No folders selected.\nGo to 'Choose Shared Paths' to start.")
         }
 
-        data class AddressItem(val label: String, val folderName: String, val url: String, val isStorage: Boolean)
+        data class AddressItem(
+            val label: String,
+            val folderName: String,
+            val url: String,
+            val isStorage: Boolean,
+            val isImmune: Boolean
+        )
 
         val addressList = mutableListOf<AddressItem>()
 
         activeServers.forEach { server ->
             val rootPath = server.rootDirectory.absolutePath
-
             val storageLabel = when {
                 rootPath.contains("emulated/0") -> "Internal Storage"
                 rootPath.lowercase().contains("usb") -> "USB OTG (${server.rootDirectory.name})"
@@ -222,17 +227,23 @@ class WebDAVService : Service() {
                 val folder = File(path)
                 val isRoot = path == rootPath
                 val relativePath = path.removePrefix(rootPath).trimStart('/')
+                val isImmune = folder.name == "SharedItems"
 
                 addressList.add(AddressItem(
                     label = storageLabel,
                     folderName = folder.name,
                     url = "http://$ip:${server.port}/$relativePath",
-                    isStorage = isRoot
+                    isStorage = isRoot,
+                    isImmune = isImmune
                 ))
             }
         }
 
-        addressList.sortWith(compareByDescending<AddressItem> { it.isStorage }.thenBy { it.folderName.lowercase() })
+        addressList.sortWith(
+            compareByDescending<AddressItem> { it.isImmune }
+                .thenByDescending { it.isStorage }
+                .thenBy { it.folderName.lowercase() }
+        )
 
         addressList.forEach { item ->
             val displayName = if (item.isStorage) item.label else item.folderName

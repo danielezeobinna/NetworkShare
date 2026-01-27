@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -117,6 +118,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         initPermissions()
         WebDAVService.loadPaths(this)
+        handleIncomingShare(intent)
         loadAddresses()
 
         isDiscoveryOn = isServiceRunning()
@@ -171,6 +173,14 @@ class MainActivity : ComponentActivity() {
             }
             startService(intent)
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingShare(intent)
+
+        Toast.makeText(this, "New item added to SharedItems!", Toast.LENGTH_SHORT).show()
     }
 
     private fun saveAddresses(addresses: String) {
@@ -268,6 +278,91 @@ class MainActivity : ComponentActivity() {
                 Manifest.permission.WRITE_EXTERNAL_STORAGE
             ))
         }
+    }
+
+    private fun handleIncomingShare(intent: Intent) {
+        val action = intent.action
+        val type = intent.type
+
+        if (Intent.ACTION_SEND == action && type != null) {
+            val uri = androidx.core.content.IntentCompat.getParcelableExtra(
+                intent,
+                Intent.EXTRA_STREAM,
+                android.net.Uri::class.java
+            )
+            if (uri != null) {
+                saveUriToSharedFolder(uri)
+            }
+        } else if (Intent.ACTION_SEND_MULTIPLE == action && type != null) {
+            val uris = androidx.core.content.IntentCompat.getParcelableArrayListExtra(
+                intent,
+                Intent.EXTRA_STREAM,
+                android.net.Uri::class.java
+            )
+            uris?.forEach { saveUriToSharedFolder(it) }
+        }
+    }
+
+    private fun saveUriToSharedFolder(uri: android.net.Uri) {
+        try {
+            // 1. Get the Root of Internal Storage
+            val rootDir = Environment.getExternalStorageDirectory()
+            val sharedDir = File(rootDir, "SharedItems")
+
+            // 2. Create the folder if it doesn't exist
+            if (!sharedDir.exists()) {
+                val created = sharedDir.mkdirs()
+                if (!created) {
+                    // If mkdirs fails, it might be a permission issue on Android 11+
+                    Log.e("NetworkShare", "Could not create root folder, check permissions")
+                }
+            }
+
+            // 3. Get actual filename and copy
+            val fileName = getFileName(uri) ?: "shared_${System.currentTimeMillis()}"
+            val destFile = File(sharedDir, fileName)
+
+            contentResolver.openInputStream(uri)?.use { input ->
+                destFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+
+            // 4. The "Checking" Feature: Link it to WebDAV
+            val path = sharedDir.absolutePath
+            if (!WebDAVService.selectedPaths.contains(path)) {
+                WebDAVService.selectedPaths.add(path)
+                WebDAVService.savePaths(this)
+            }
+
+            // 5. Refresh Service for the PC
+            val refreshIntent = Intent(this, WebDAVService::class.java).apply {
+                action = "REFRESH_INFO"
+            }
+            startService(refreshIntent)
+
+        } catch (e: Exception) {
+            Log.e("NetworkShare", "Error: ${e.message}")
+            Toast.makeText(this, "Permission Denied: Cannot write to root storage", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun getFileName(uri: android.net.Uri): String? {
+        var result: String? = null
+        if (uri.scheme == "content") {
+            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val index = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    if (index != -1) result = cursor.getString(index)
+                }
+            }
+        }
+        if (result == null) {
+            result = uri.path
+            val cut = result?.lastIndexOf('/') ?: -1
+            if (cut != -1) result = result?.substring(cut + 1)
+        }
+        return result
     }
 }
 
@@ -400,7 +495,13 @@ fun DiscoveryScreen(
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace,
                             fontSize = 14.sp,
-                            color = if (isOn) MaterialTheme.colorScheme.onSurface else Color.Gray,
+                            color = if (isUrl && isOn) {
+                                MaterialTheme.colorScheme.primary
+                            } else if (isOn) {
+                                MaterialTheme.colorScheme.onSurface
+                            } else {
+                                Color.Gray
+                            },
                             modifier = Modifier.padding(
                                 bottom = if (isUrl) 16.dp else 2.dp,
                                 top = 2.dp
