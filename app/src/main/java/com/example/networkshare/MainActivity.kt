@@ -12,7 +12,6 @@ import android.os.Environment
 import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -53,9 +52,12 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricPrompt
+import androidx.core.content.ContextCompat
 
-class MainActivity : ComponentActivity() {
-
+class MainActivity : androidx.fragment.app.FragmentActivity() {
+    private var isUnlocked by mutableStateOf(false)
     private var serverAddresses by mutableStateOf("Internal Storage:\nhttp://0.0.0.0:8080/")
     private var isDiscoveryOn by mutableStateOf(false)
     private var isPending by mutableStateOf(false)
@@ -115,6 +117,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
         enableEdgeToEdge()
         initPermissions()
         WebDAVService.loadPaths(this)
@@ -122,6 +125,7 @@ class MainActivity : ComponentActivity() {
         loadAddresses()
 
         isDiscoveryOn = isServiceRunning()
+        showBiometricPrompt()
         if (isDiscoveryOn) updateAddresses()
 
         setContent {
@@ -129,20 +133,55 @@ class MainActivity : ComponentActivity() {
                 val isPickerOpen = remember { mutableStateOf(false) }
 
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    if (!isPickerOpen.value) {
-                        DiscoveryScreen(
-                            isOn = isDiscoveryOn,
-                            isPending = isPending,
-                            addresses = serverAddresses,
-                            onToggle = { start, showDialog -> handleToggle(start, showDialog) },
-                            onOpenPicker = { isPickerOpen.value = true }
-                        )
+                    if (isUnlocked) {
+                        if (!isPickerOpen.value) {
+                            DiscoveryScreen(
+                                isOn = isDiscoveryOn,
+                                isPending = isPending,
+                                addresses = serverAddresses,
+                                onToggle = { start, showDialog -> handleToggle(start, showDialog) },
+                                onOpenPicker = { isPickerOpen.value = true }
+                            )
+                        } else {
+                            FilePickerSection(onBack = { isPickerOpen.value = false })
+                        }
                     } else {
-                        FilePickerSection(onBack = { isPickerOpen.value = false })
+                        // Optional: Show a "Locked" placeholder screen here
+                        Box(contentAlignment = Alignment.Center) {
+                            Text("Locked. Please authenticate.")
+                        }
                     }
                 }
             }
         }
+    }
+
+    private fun showBiometricPrompt() {
+        val executor = ContextCompat.getMainExecutor(this)
+        val biometricPrompt = BiometricPrompt(this, executor,
+            object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    super.onAuthenticationSucceeded(result)
+                    isUnlocked = true // Reveal the UI
+                }
+
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    super.onAuthenticationError(errorCode, errString)
+                    // If user cancels or fails, close the app for security
+                    if (errorCode != BiometricPrompt.ERROR_USER_CANCELED) {
+                        Toast.makeText(this@MainActivity, "Auth Error: $errString", Toast.LENGTH_SHORT).show()
+                    }
+                    finish()
+                }
+            })
+
+        val promptInfo = BiometricPrompt.PromptInfo.Builder()
+            .setTitle("Network Share Security")
+            .setSubtitle("Authenticate to manage your server")
+            .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+            .build()
+
+        biometricPrompt.authenticate(promptInfo)
     }
 
     override fun onStart() {
@@ -159,6 +198,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
+        isUnlocked = false
         try { unregisterReceiver(receiver) } catch (_: Exception) {}
     }
 
@@ -166,6 +206,10 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         val running = isServiceRunning()
         isDiscoveryOn = running
+
+        if (!isUnlocked) {
+            showBiometricPrompt()
+        }
 
         if (running) {
             val intent = Intent(this, WebDAVService::class.java).apply {
@@ -179,8 +223,6 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleIncomingShare(intent)
-
-        Toast.makeText(this, "New item added to SharedItems!", Toast.LENGTH_SHORT).show()
     }
 
     private fun saveAddresses(addresses: String) {
@@ -305,20 +347,16 @@ class MainActivity : ComponentActivity() {
 
     private fun saveUriToSharedFolder(uri: android.net.Uri) {
         try {
-            // 1. Get the Root of Internal Storage
             val rootDir = Environment.getExternalStorageDirectory()
             val sharedDir = File(rootDir, "SharedItems")
 
-            // 2. Create the folder if it doesn't exist
             if (!sharedDir.exists()) {
                 val created = sharedDir.mkdirs()
                 if (!created) {
-                    // If mkdirs fails, it might be a permission issue on Android 11+
                     Log.e("NetworkShare", "Could not create root folder, check permissions")
                 }
             }
 
-            // 3. Get actual filename and copy
             val fileName = getFileName(uri) ?: "shared_${System.currentTimeMillis()}"
             val destFile = File(sharedDir, fileName)
 
@@ -328,14 +366,16 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            // 4. The "Checking" Feature: Link it to WebDAV
             val path = sharedDir.absolutePath
             if (!WebDAVService.selectedPaths.contains(path)) {
                 WebDAVService.selectedPaths.add(path)
                 WebDAVService.savePaths(this)
             }
 
-            // 5. Refresh Service for the PC
+            WebDAVService.tempPriorityPath = path
+
+            Toast.makeText(this, "New item added to SharedItems!", Toast.LENGTH_SHORT).show()
+
             val refreshIntent = Intent(this, WebDAVService::class.java).apply {
                 action = "REFRESH_INFO"
             }
@@ -343,7 +383,7 @@ class MainActivity : ComponentActivity() {
 
         } catch (e: Exception) {
             Log.e("NetworkShare", "Error: ${e.message}")
-            Toast.makeText(this, "Permission Denied: Cannot write to root storage", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Error saving file", Toast.LENGTH_LONG).show()
         }
     }
 

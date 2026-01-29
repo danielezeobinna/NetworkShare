@@ -53,6 +53,7 @@ dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("org.nanohttpd:nanohttpd:2.3.1")
     implementation(libs.androidx.compose.foundation)
+    implementation("androidx.biometric:biometric:1.2.0-alpha05")
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

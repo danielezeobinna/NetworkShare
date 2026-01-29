@@ -210,7 +210,7 @@ class WebDAVService : Service() {
             val folderName: String,
             val url: String,
             val isStorage: Boolean,
-            val isImmune: Boolean
+            val isTempVip: Boolean
         )
 
         val addressList = mutableListOf<AddressItem>()
@@ -227,20 +227,20 @@ class WebDAVService : Service() {
                 val folder = File(path)
                 val isRoot = path == rootPath
                 val relativePath = path.removePrefix(rootPath).trimStart('/')
-                val isImmune = folder.name == "SharedItems"
+                val isTempVip = path == tempPriorityPath
 
                 addressList.add(AddressItem(
                     label = storageLabel,
                     folderName = folder.name,
                     url = "http://$ip:${server.port}/$relativePath",
                     isStorage = isRoot,
-                    isImmune = isImmune
+                    isTempVip = isTempVip
                 ))
             }
         }
 
         addressList.sortWith(
-            compareByDescending<AddressItem> { it.isImmune }
+            compareByDescending<AddressItem> { it.isTempVip }
                 .thenByDescending { it.isStorage }
                 .thenBy { it.folderName.lowercase() }
         )
@@ -337,6 +337,7 @@ class WebDAVService : Service() {
         var scannedItems = mutableStateListOf<FolderItem>()
         var isScanning = mutableStateOf(false)
         var selectedPaths = mutableStateListOf<String>()
+        var tempPriorityPath: String? = null
         val activeServers = mutableListOf<WebDAVServer>()
 
         fun savePaths(context: Context) {
