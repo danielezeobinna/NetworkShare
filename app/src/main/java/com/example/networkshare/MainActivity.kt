@@ -145,11 +145,6 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                         } else {
                             FilePickerSection(onBack = { isPickerOpen.value = false })
                         }
-                    } else {
-                        // Optional: Show a "Locked" placeholder screen here
-                        Box(contentAlignment = Alignment.Center) {
-                            Text("Locked. Please authenticate.")
-                        }
                     }
                 }
             }
