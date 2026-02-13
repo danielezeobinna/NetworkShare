@@ -55,6 +55,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
+import android.app.KeyguardManager
 
 class MainActivity : androidx.fragment.app.FragmentActivity() {
     private var isUnlocked by mutableStateOf(false)
@@ -152,17 +153,38 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     }
 
     private fun showBiometricPrompt() {
+        val km = getSystemService(KEYGUARD_SERVICE) as KeyguardManager
+        val biometricManager = BiometricManager.from(this)
+
+        // 1. If the phone has NO security at all (No PIN/Pattern), just let them in.
+        if (!km.isDeviceSecure) {
+            isUnlocked = true
+            return
+        }
+
+        // 2. Check if we can actually show the fingerprint screen
+        val canAuth = biometricManager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)
+
+        // 3. If it's Android 9 AND no fingerprints are enrolled, just let them in.
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P && canAuth != BiometricManager.BIOMETRIC_SUCCESS) {
+            isUnlocked = true
+            return
+        }
+
+        // --- FROM HERE DOWN IS THE ACTUAL PROMPT FOR PHONES THAT HAVE SECURITY ---
+
         val executor = ContextCompat.getMainExecutor(this)
         val biometricPrompt = BiometricPrompt(this, executor,
             object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                     super.onAuthenticationSucceeded(result)
-                    isUnlocked = true // Reveal the UI
+                    isUnlocked = true
                 }
 
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
                     super.onAuthenticationError(errorCode, errString)
-                    // If user cancels or fails, close the app for security
+                    // On Android 9, if fingerprint fails/is missing, we already checked above.
+                    // This part only hits if they click "Cancel" or fail too many times.
                     if (errorCode != BiometricPrompt.ERROR_USER_CANCELED) {
                         Toast.makeText(this@MainActivity, "Auth Error: $errString", Toast.LENGTH_SHORT).show()
                     }
@@ -170,13 +192,22 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                 }
             })
 
-        val promptInfo = BiometricPrompt.PromptInfo.Builder()
+        val builder = BiometricPrompt.PromptInfo.Builder()
             .setTitle("Network Share Security")
             .setSubtitle("Authenticate to manage your server")
-            .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL)
-            .build()
 
-        biometricPrompt.authenticate(promptInfo)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Android 10/12: Show Fingerprint + PIN
+            builder.setAllowedAuthenticators(
+                BiometricManager.Authenticators.BIOMETRIC_STRONG or
+                        BiometricManager.Authenticators.DEVICE_CREDENTIAL
+            )
+        } else {
+            // Android 9: Show Fingerprint + Cancel
+            builder.setNegativeButtonText("Cancel")
+        }
+
+        biometricPrompt.authenticate(builder.build())
     }
 
     override fun onStart() {
