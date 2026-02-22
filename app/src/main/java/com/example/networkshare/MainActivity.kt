@@ -64,14 +64,6 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     private var isPending by mutableStateOf(false)
     private var showNetworkDialog by mutableStateOf(false)
 
-    private val requestPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { isGranted ->
-        if (!isGranted.values.all { it }) {
-            Toast.makeText(this, "Permissions denied", Toast.LENGTH_SHORT).show()
-        }
-    }
-
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -120,7 +112,6 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         super.onCreate(savedInstanceState)
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
         enableEdgeToEdge()
-        initPermissions()
         WebDAVService.loadPaths(this)
         handleIncomingShare(intent)
         loadAddresses()
@@ -179,6 +170,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                     super.onAuthenticationSucceeded(result)
                     isUnlocked = true
+                    initPermissions()
                 }
 
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
@@ -341,10 +333,11 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                 startActivity(intent)
             }
         } else {
-            requestPermissionLauncher.launch(arrayOf(
+            val permissions = arrayOf(
                 Manifest.permission.READ_EXTERNAL_STORAGE,
                 Manifest.permission.WRITE_EXTERNAL_STORAGE
-            ))
+            )
+            androidx.core.app.ActivityCompat.requestPermissions(this, permissions, 101)
         }
     }
 
