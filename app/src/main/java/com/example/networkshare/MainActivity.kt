@@ -58,6 +58,10 @@ import androidx.core.content.ContextCompat
 import android.app.KeyguardManager
 
 class MainActivity : androidx.fragment.app.FragmentActivity() {
+    companion object {
+        private const val REQ_PIN = 9999
+    }
+
     private var isUnlocked by mutableStateOf(false)
     private var serverAddresses by mutableStateOf("Internal Storage:\nhttp://0.0.0.0:8080/")
     private var isDiscoveryOn by mutableStateOf(false)
@@ -122,20 +126,25 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 
         setContent {
             NetworkShareTheme {
-                val isPickerOpen = remember { mutableStateOf(false) }
-
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    if (isUnlocked) {
-                        if (!isPickerOpen.value) {
-                            DiscoveryScreen(
-                                isOn = isDiscoveryOn,
-                                isPending = isPending,
-                                addresses = serverAddresses,
-                                onToggle = { start, showDialog -> handleToggle(start, showDialog) },
-                                onOpenPicker = { isPickerOpen.value = true }
-                            )
-                        } else {
-                            FilePickerSection(onBack = { isPickerOpen.value = false })
+                    when {
+                        !isUnlocked -> {
+                            BiometricGateScreen(onUnlockClick = { showBiometricPrompt() })
+                        }
+
+                        else -> {
+                            val isPickerOpen = remember { mutableStateOf(false) }
+                            if (!isPickerOpen.value) {
+                                DiscoveryScreen(
+                                    isOn = isDiscoveryOn,
+                                    isPending = isPending,
+                                    addresses = serverAddresses,
+                                    onToggle = { start, showDialog -> handleToggle(start, showDialog) },
+                                    onOpenPicker = { isPickerOpen.value = true }
+                                )
+                            } else {
+                                FilePickerSection(onBack = { isPickerOpen.value = false })
+                            }
                         }
                     }
                 }
@@ -147,23 +156,40 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         val km = getSystemService(KEYGUARD_SERVICE) as KeyguardManager
         val biometricManager = BiometricManager.from(this)
 
-        // 1. If the phone has NO security at all (No PIN/Pattern), just let them in.
+        // 1. If the phone has NO security at all, just let them in.
         if (!km.isDeviceSecure) {
             isUnlocked = true
+            initPermissions()
             return
         }
 
-        // 2. Check if we can actually show the fingerprint screen
+        // 2. Define the legacy PIN fallback function to avoid repeating code
+        val launchLegacyPin = {
+            @Suppress("DEPRECATION")
+            val intent = km.createConfirmDeviceCredentialIntent(
+                "NetworkShare Security", // The Title (Keep this so they know WHY they are being asked)
+                null                      // Passing null for the description
+            )
+
+            if (intent != null) {
+                startActivityForResult(intent, REQ_PIN)
+            } else {
+                // Fallback if for some reason the intent couldn't be created
+                isUnlocked = true
+                initPermissions()
+            }
+        }
+
+        // 3. Check if Biometrics (Fingerprint/Face) are available/enrolled
         val canAuth = biometricManager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)
 
-        // 3. If it's Android 9 AND no fingerprints are enrolled, just let them in.
+        // If on Android 9 (or below) and no biometrics are set up, go straight to PIN
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P && canAuth != BiometricManager.BIOMETRIC_SUCCESS) {
-            isUnlocked = true
+            launchLegacyPin()
             return
         }
 
-        // --- FROM HERE DOWN IS THE ACTUAL PROMPT FOR PHONES THAT HAVE SECURITY ---
-
+        // --- BIOMETRIC PROMPT SETUP ---
         val executor = ContextCompat.getMainExecutor(this)
         val biometricPrompt = BiometricPrompt(this, executor,
             object : BiometricPrompt.AuthenticationCallback() {
@@ -175,31 +201,61 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
                     super.onAuthenticationError(errorCode, errString)
-                    // On Android 9, if fingerprint fails/is missing, we already checked above.
-                    // This part only hits if they click "Cancel" or fail too many times.
-                    if (errorCode != BiometricPrompt.ERROR_USER_CANCELED) {
-                        Toast.makeText(this@MainActivity, "Auth Error: $errString", Toast.LENGTH_SHORT).show()
+
+                    when (errorCode) {
+                        // 1. User clicked "Use PIN / Pattern"
+                        BiometricPrompt.ERROR_NEGATIVE_BUTTON -> {
+                            launchLegacyPin()
+                        }
+
+                        // 2. Too many failed attempts! Switch to PIN automatically.
+                        BiometricPrompt.ERROR_LOCKOUT,
+                        BiometricPrompt.ERROR_LOCKOUT_PERMANENT -> {
+                            launchLegacyPin()
+                        }
+
+                        // 3. User explicitly swiped away or hit back
+                        BiometricPrompt.ERROR_USER_CANCELED -> {
+                        }
+
+                        // 4. Anything else (Hardware error, sensor dirty, etc.)
+                        else -> {
+                            Toast.makeText(this@MainActivity, errString, Toast.LENGTH_SHORT).show()
+                        }
                     }
-                    finish()
                 }
             })
 
         val builder = BiometricPrompt.PromptInfo.Builder()
-            .setTitle("Network Share Security")
+            .setTitle("NetworkShare Security")
             .setSubtitle("Authenticate to manage your server")
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // Android 10/12: Show Fingerprint + PIN
+            // Android 10+: Unified Fingerprint + PIN screen
             builder.setAllowedAuthenticators(
                 BiometricManager.Authenticators.BIOMETRIC_STRONG or
                         BiometricManager.Authenticators.DEVICE_CREDENTIAL
             )
         } else {
-            // Android 9: Show Fingerprint + Cancel
-            builder.setNegativeButtonText("Cancel")
+            // Android 9: Custom "Use PIN" button that triggers our legacy fallback
+            builder.setNegativeButtonText("Try Another Way")
         }
 
         biometricPrompt.authenticate(builder.build())
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+
+        if (requestCode == REQ_PIN) {
+            if (resultCode == RESULT_OK) {
+                isUnlocked = true
+                initPermissions()
+            } else {
+                Toast.makeText(this, "Authentication failed", Toast.LENGTH_SHORT).show()
+                finish()
+            }
+        }
     }
 
     override fun onStart() {
@@ -466,7 +522,7 @@ fun DiscoveryScreen(
                     fontSize = 20.sp
                 )
                 Text(
-                    text = "Your phone can be accessed by your PC on the network",
+                    text = "Your phone can be accessed by other devices on the network",
                     fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onSurface,
                     lineHeight = 18.sp
@@ -769,7 +825,12 @@ fun FilePickerSection(onBack: () -> Unit) {
                 },
                 modifier = Modifier.size(32.dp).offset(x = (-8).dp)
             ) {
-                Text("<", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                Icon(
+                    painter = painterResource(id = R.drawable.baseline_chevron_left),
+                    contentDescription = "Back",
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(32.dp)
+                )
             }
 
             // Increased gap to "bring the breadcrumb list down more"
@@ -807,7 +868,12 @@ fun FilePickerSection(onBack: () -> Unit) {
                         // Skip showing segments like "storage" or "emulated"
                         // only if they are just parents of the actual storage roots
                         if (file.path != "/storage" && file.path != "/storage/emulated") {
-                            Text("  >  ", color = Color(0xFF666660), fontSize = 14.sp)
+                            Icon(
+                                painter = painterResource(id = R.drawable.baseline_chevron_right),
+                                contentDescription = null,
+                                tint = Color(0xFF666660),
+                                modifier = Modifier.size(22.dp).padding(horizontal = 2.dp)
+                            )
                             Text(
                                 text = formatBreadcrumbName(rawName),
                                 fontSize = 18.sp,
@@ -966,15 +1032,49 @@ fun StorageRow(
                 }
         ) {
             if (isChecked || isInherited) {
-                Text(
-                    text = "✓",
-                    color = if (isInherited) inheritedCheck else if (isSystemInDarkTheme()) Color.Black else Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp,
+                Icon(
+                    painter = painterResource(id = R.drawable.baseline_check), // Your generated Vector Asset
+                    contentDescription = "Selected",
+                    tint = if (isInherited) {
+                        inheritedCheck
+                    } else if (isSystemInDarkTheme()) {
+                        Color.Black
+                    } else {
+                        Color.White
+                    },
+                    modifier = Modifier
+                        .size(22.dp) // Slightly larger than the 14.sp text to maintain "weight"
+                        .padding(2.dp)
                 )
             } else if (isPartiallyChecked) {
                 Box(modifier = Modifier.size(10.dp).background(Color(0xFF2BAED5), RoundedCornerShape(2.dp)))
             }
+        }
+    }
+}
+
+@Composable
+fun BiometricGateScreen(onUnlockClick: () -> Unit) {
+    // Automatically try to show the prompt when this screen appears
+    LaunchedEffect(Unit) { onUnlockClick() }
+
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Image(
+            painter = painterResource(id = R.drawable.baseline_lock), // Or a lock icon
+            contentDescription = null,
+            modifier = Modifier.size(64.dp)
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Text("App Locked", color = MaterialTheme.colorScheme.onSurface, fontSize = 20.sp)
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(onClick = onUnlockClick) {
+            Text(text = "Verify Authentication",
+                color = if (isSystemInDarkTheme()) Color.Black else Color.White
+            )
         }
     }
 }

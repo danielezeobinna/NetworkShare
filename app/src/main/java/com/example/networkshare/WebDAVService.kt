@@ -95,7 +95,7 @@ class WebDAVService : Service() {
         val notification = NotificationCompat.Builder(this, channelId)
             .setSmallIcon(R.drawable.ic_stat_name)
             .setContentTitle("Network sharing is turned on")
-            .setContentText("Your phone can be accessed by your PC")
+            .setContentText("Your phone can be accessed by other devices on this network")
             .setOngoing(true)
             .setColor("#2BAED5".toColorInt())
             .setContentIntent(contentPendingIntent)
