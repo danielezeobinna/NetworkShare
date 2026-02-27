@@ -13,6 +13,7 @@ import android.app.NotificationManager
 import androidx.core.app.NotificationCompat
 import androidx.core.graphics.toColorInt
 import kotlin.math.log10
+import kotlin.math.min
 import kotlin.math.pow
 
 class WebDAVServer(
@@ -59,7 +60,7 @@ class WebDAVServer(
         return when (method) {
             Method.OPTIONS -> serveOptions()
             Method.PROPFIND -> if (targetFile.exists()) servePropfind(targetFile, session) else serveNotFound()
-            Method.GET -> if (targetFile.exists()) serveFile(targetFile) else serveNotFound()
+            Method.GET -> if (targetFile.exists()) serveFile(targetFile, session) else serveNotFound()
             Method.DELETE -> handleDelete(targetFile)
             Method.PUT -> handlePut(session, targetFile)
             Method.MKCOL -> handleMkcol(targetFile)
@@ -67,7 +68,13 @@ class WebDAVServer(
             Method.MOVE -> handleMove(session, targetFile)
             Method.LOCK -> serveLock(uri)
             Method.UNLOCK -> newFixedLengthResponse(Response.Status.NO_CONTENT, MIME_PLAINTEXT, "")
-            Method.HEAD -> if (targetFile.exists()) newFixedLengthResponse(Response.Status.OK, null, "") else serveNotFound()
+            Method.HEAD -> if (targetFile.exists()) {
+                val res = newFixedLengthResponse(Response.Status.OK, "application/octet-stream", "")
+                res.addHeader("Content-Length", targetFile.length().toString())
+                res.addHeader("Accept-Ranges", "bytes")
+                res.addHeader("ETag", "\"${targetFile.lastModified()}-${targetFile.length()}\"")
+                res
+            } else serveNotFound()
             else -> newFixedLengthResponse(Response.Status.METHOD_NOT_ALLOWED, MIME_PLAINTEXT, "Not Supported")
         }
     }
@@ -217,72 +224,89 @@ class WebDAVServer(
         return res
     }
 
-    private fun serveFile(target: File): Response {
+    private fun serveFile(target: File, session: IHTTPSession): Response {
+        val fileLength = target.length()
+        // Using ?. let's us check nullability safely to fix the 'startsWith' error
+        val rangeHeader = session.headers["range"]
+
         return try {
-            if (target.isDirectory) {
-                newFixedLengthResponse(Response.Status.FORBIDDEN, MIME_PLAINTEXT, "Directory GET forbidden")
-            } else {
-                val path = target.absolutePath
-                val notificationId = target.name.hashCode()
-                PersistenceGuard.markStarted(context, path)
+            if (target.isDirectory) return newFixedLengthResponse(Response.Status.FORBIDDEN, MIME_PLAINTEXT, "Directory GET forbidden")
 
-                val manager = context.getSystemService(NotificationManager::class.java)
-                val builder = NotificationCompat.Builder(context, "WebDAV_Service_Channel")
-                    .setSmallIcon(android.R.drawable.stat_sys_upload)
-                    .setContentTitle("Uploading ${target.name}")
-                    .setColor("#2BAED5".toColorInt())
-                    .setOngoing(true)
-                    .setOnlyAlertOnce(true)
-                    .setPriority(NotificationCompat.PRIORITY_LOW)
+            var startOffset = 0L
+            var endOffset = fileLength - 1
+            var isPartial = false
 
-                val fileStream = object : FileInputStream(target) {
-                    var totalBytesRead = 0L
-                    var lastPercent = -1
+            // 1. Handle the Range Header (The Seeking Logic)
+            if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
+                isPartial = true
+                val range = rangeHeader.substring(6).split("-")
+                startOffset = range[0].toLongOrNull() ?: 0L
+                if (range.size > 1 && range[1].isNotEmpty()) {
+                    endOffset = range[1].toLongOrNull() ?: (fileLength - 1)
+                }
+            }
 
-                    override fun read(b: ByteArray, off: Int, len: Int): Int {
-                        return try {
-                            val bytesRead = super.read(b, off, len)
-                            if (bytesRead != -1) {
-                                totalBytesRead += bytesRead
+            val dataToDeliver = endOffset - startOffset + 1
+            val notificationId = target.name.hashCode()
 
-                                val totalSize = target.length()
-                                if (totalSize > 0) {
-                                    val percent = (totalBytesRead * 100 / totalSize).toInt()
+            // 2. Setup Notification
+            val manager = context.getSystemService(NotificationManager::class.java)
+            val builder = NotificationCompat.Builder(context, "WebDAV_Service_Channel")
+                .setSmallIcon(android.R.drawable.stat_sys_upload)
+                .setContentTitle("Uploading ${target.name}")
+                .setColor("#2BAED5".toColorInt())
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
 
-                                    if (percent != lastPercent && percent % 5 == 0) {
-                                        builder.setProgress(100, percent, false)
-                                        builder.setContentText("${formatSize(totalBytesRead)} / ${formatSize(totalSize)}")
-                                        manager?.notify(notificationId, builder.build())
-                                        lastPercent = percent
-                                    }
-                                }
+            // 3. Create the Custom Stream with Progress Logic
+            val fis = FileInputStream(target)
+            if (startOffset > 0) fis.skip(startOffset)
+
+            val fileStream = object : FileInputStream(fis.fd) {
+                var totalBytesRead = 0L
+                var lastPercent = -1
+
+                override fun read(b: ByteArray, off: Int, len: Int): Int {
+                    val maxToRead = min(len.toLong(), dataToDeliver - totalBytesRead).toInt()
+                    if (maxToRead <= 0) return -1
+
+                    val bytesRead = fis.read(b, off, maxToRead)
+                    if (bytesRead != -1) {
+                        totalBytesRead += bytesRead
+
+                        // Only update if it's a significant size (over 1MB)
+                        if (dataToDeliver > 1024 * 1024) {
+                            val percent = (totalBytesRead * 100 / dataToDeliver).toInt()
+                            if (percent != lastPercent && percent % 5 == 0) {
+                                builder.setProgress(100, percent, false)
+                                builder.setContentText("${formatSize(totalBytesRead)} / ${formatSize(dataToDeliver)}")
+                                manager?.notify(notificationId, builder.build())
+                                lastPercent = percent
                             }
-
-                            if (totalBytesRead >= target.length()) {
-                                PersistenceGuard.markVerified(context, path)
-                            }
-                            bytesRead
-                        } catch (e: IOException) {
-                            close()
-                            throw e
                         }
                     }
-
-                    override fun close() {
-                        super.close()
-                        manager?.cancel(notificationId)
-
-                        if (totalBytesRead < target.length()) {
-                            Log.w(tag, "Transfer failed at $totalBytesRead bytes. Safety lock maintained.")
-                            PersistenceGuard.markStarted(context, path)
-                        }
-                    }
+                    return bytesRead
                 }
 
-                val res = newFixedLengthResponse(Response.Status.OK, "application/octet-stream", fileStream, target.length())
-                res.addHeader("Connection", "close")
-                return res
+                override fun close() {
+                    fis.close()
+                    manager?.cancel(notificationId)
+                    super.close()
+                }
             }
+
+            // 4. Send the Response
+            val status = if (isPartial) Response.Status.PARTIAL_CONTENT else Response.Status.OK
+            val res = newFixedLengthResponse(status, "application/octet-stream", fileStream, dataToDeliver)
+
+            res.addHeader("Accept-Ranges", "bytes")
+            res.addHeader("ETag", "\"${target.lastModified()}-${target.length()}\"")
+            if (isPartial) {
+                res.addHeader("Content-Range", "bytes $startOffset-$endOffset/$fileLength")
+            }
+            return res
+
         } catch (e: Exception) {
             Log.e(tag, "Read Error: ${e.message}")
             newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Read Error")
@@ -322,32 +346,29 @@ class WebDAVServer(
     private fun getFilePropertiesXml(file: File, uri: String): String {
         val isDir = file.isDirectory
         val sdf = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss z", Locale.US).apply { timeZone = TimeZone.getTimeZone("GMT") }
+        // Windows loves this specific format for creation dates
+        val creationDate = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("GMT") }.format(Date(file.lastModified()))
+        val etag = "\"${file.lastModified()}-${file.length()}\""
 
-        val safeDisplayName = file.name
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace("\"", "&quot;")
-            .replace("'", "&apos;")
-
-        val safeUri = uri.split("/").joinToString("/") { segment ->
-            java.net.URLEncoder.encode(segment, "UTF-8").replace("+", "%20")
-        }
+        val safeDisplayName = file.name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        val safeUri = uri.split("/").joinToString("/") { java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
 
         return """
-        <D:response>
-            <D:href>$safeUri</D:href>
-            <D:propstat>
-                <D:prop>
-                    <D:displayname>$safeDisplayName</D:displayname>
-                    <D:getcontentlength>${if (isDir) 0 else file.length()}</D:getcontentlength>
-                    <D:resourcetype>${if (isDir) "<D:collection/>" else ""}</D:resourcetype>
-                    <D:getlastmodified>${sdf.format(Date(file.lastModified()))}</D:getlastmodified>
-                </D:prop>
-                <D:status>HTTP/1.1 200 OK</D:status>
-            </D:propstat>
-        </D:response>
-    """.trimIndent()
+    <D:response>
+        <D:href>$safeUri</D:href>
+        <D:propstat>
+            <D:prop>
+                <D:displayname>$safeDisplayName</D:displayname>
+                <D:getcontentlength>${if (isDir) 0 else file.length()}</D:getcontentlength>
+                <D:resourcetype>${if (isDir) "<D:collection/>" else ""}</D:resourcetype>
+                <D:getlastmodified>${sdf.format(Date(file.lastModified()))}</D:getlastmodified>
+                <D:creationdate>$creationDate</D:creationdate>
+                <D:getetag>$etag</D:getetag>
+            </D:prop>
+            <D:status>HTTP/1.1 200 OK</D:status>
+        </D:propstat>
+    </D:response>
+""".trimIndent()
     }
 
     fun stopServer() = stop()

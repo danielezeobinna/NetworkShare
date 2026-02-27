@@ -56,6 +56,12 @@ import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import android.app.KeyguardManager
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 
 class MainActivity : androidx.fragment.app.FragmentActivity() {
     companion object {
@@ -492,6 +498,7 @@ fun DiscoveryScreen(
 ) {
     val isDark = isSystemInDarkTheme()
     val context = LocalContext.current
+    val listState = rememberLazyListState()
 
     var showNetworkDialog by remember { mutableStateOf(false) }
 
@@ -596,7 +603,9 @@ fun DiscoveryScreen(
         ) {
             SelectionContainer {
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier
+                        .drawScrollbar(listState, color = Color.DarkGray.copy(alpha = 0.6f))
                         .padding(16.dp)
                         .graphicsLayer(alpha = if (isOn) 1f else 0.5f)
                 ) {
@@ -744,6 +753,26 @@ fun FilePickerSection(onBack: () -> Unit) {
     val activity = context as MainActivity
     var currentPath by remember { mutableStateOf<File?>(null) }
 
+    val handleBack = {
+        if (currentPath == null) {
+            val intent = Intent(context, WebDAVService::class.java).apply {
+                action = "REFRESH_INFO"
+            }
+            context.startService(intent)
+            onBack()
+        } else {
+            val storages = activity.getAvailableStorages()
+            currentPath = if (storages.any { it.absolutePath == currentPath?.absolutePath }) {
+                null
+            } else {
+                currentPath?.parentFile
+            }
+            WebDAVService.scannedItems.clear()
+        }
+    }
+
+    val listState = rememberLazyListState()
+
     val pathParts = remember(currentPath) {
         val parts = mutableListOf<File>()
         var temp = currentPath
@@ -769,24 +798,8 @@ fun FilePickerSection(onBack: () -> Unit) {
         }
     }
 
-    BackHandler {
-        if (currentPath == null) {
-            val intent = Intent(context, WebDAVService::class.java).apply {
-                action = "REFRESH_INFO"
-            }
-            context.startService(intent)
-
-            onBack()
-        } else {
-            val parent = currentPath?.parentFile
-            val storages = activity.getAvailableStorages()
-
-            currentPath = if (storages.any { it.absolutePath == currentPath?.absolutePath }) {
-                null
-            } else {
-                parent
-            }
-        }
+    BackHandler(enabled = true) {
+        handleBack()
     }
 
     Column(
@@ -816,13 +829,7 @@ fun FilePickerSection(onBack: () -> Unit) {
         ) {
             // Back Button (<)
             IconButton(
-                onClick = {
-                    // This triggers the same logic as your BackHandler
-                    if (currentPath == null) onBack() else {
-                        val storages = activity.getAvailableStorages()
-                        currentPath = if (storages.any { it.absolutePath == currentPath?.absolutePath }) null else currentPath?.parentFile
-                    }
-                },
+                onClick = { handleBack() },
                 modifier = Modifier.size(32.dp).offset(x = (-8).dp)
             ) {
                 Icon(
@@ -846,7 +853,10 @@ fun FilePickerSection(onBack: () -> Unit) {
                     contentDescription = null,
                     modifier = Modifier
                         .size(26.dp)
-                        .clickable { currentPath = null }
+                        .clickable {
+                            currentPath = null
+                            WebDAVService.scannedItems.clear()
+                        }
                 )
 
                 // The Scrollable Path
@@ -897,8 +907,10 @@ fun FilePickerSection(onBack: () -> Unit) {
                 )
         ) {
             LazyColumn(
+                state = listState,
                 modifier = Modifier
                     .fillMaxSize()
+                    .drawScrollbar(listState, color = Color.DarkGray.copy(alpha = 0.6f))
                     .graphicsLayer(alpha = if (isLoading) 0f else 1f),
                 contentPadding = PaddingValues(horizontal = 24.dp, vertical = 32.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -1076,5 +1088,43 @@ fun BiometricGateScreen(onUnlockClick: () -> Unit) {
                 color = if (isSystemInDarkTheme()) Color.Black else Color.White
             )
         }
+    }
+}
+
+fun Modifier.drawScrollbar(
+    state: LazyListState,
+    color: Color = Color(0xFF2BAED5).copy(alpha = 0.6f)
+): Modifier = drawWithContent {
+    drawContent()
+
+    val layoutInfo = state.layoutInfo
+    val totalItems = layoutInfo.totalItemsCount
+
+    if (totalItems > 0 && layoutInfo.visibleItemsInfo.isNotEmpty()) {
+        val viewportHeight = size.height
+
+        // 1. Calculate how much of the total content is visible
+        val visibleItemsCount = layoutInfo.visibleItemsInfo.size
+        val scrollbarHeight = (viewportHeight * visibleItemsCount / totalItems).coerceAtLeast(32f)
+
+        // 2. SMOOTH MATH: Calculate position based on pixel offset, not just item index
+        val firstVisibleItem = layoutInfo.visibleItemsInfo.first()
+        val firstItemOffset = firstVisibleItem.offset.toFloat()
+        val itemHeight = firstVisibleItem.size.toFloat()
+
+        // This creates a fractional progress (e.g., 2.5 instead of just 2)
+        val scrollProgress = (state.firstVisibleItemIndex - (firstItemOffset / itemHeight)) / totalItems
+        val scrollbarOffsetY = scrollProgress * viewportHeight
+
+        // 3. SPACING: Move it away from the edge
+        val thickness = 4.dp.toPx()
+        val marginEnd = 6.dp.toPx() // This pushes it away from the right edge
+
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(size.width - marginEnd - thickness, scrollbarOffsetY.coerceIn(0f, viewportHeight - scrollbarHeight)),
+            size = Size(thickness, scrollbarHeight),
+            cornerRadius = CornerRadius(thickness / 2, thickness / 2)
+        )
     }
 }
