@@ -226,7 +226,6 @@ class WebDAVServer(
 
     private fun serveFile(target: File, session: IHTTPSession): Response {
         val fileLength = target.length()
-        // Using ?. let's us check nullability safely to fix the 'startsWith' error
         val rangeHeader = session.headers["range"]
 
         return try {
@@ -236,7 +235,7 @@ class WebDAVServer(
             var endOffset = fileLength - 1
             var isPartial = false
 
-            // 1. Handle the Range Header (The Seeking Logic)
+            // 1. Detect if this is a Stream (Partial) or a full Copy (Upload)
             if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
                 isPartial = true
                 val range = rangeHeader.substring(6).split("-")
@@ -248,18 +247,19 @@ class WebDAVServer(
 
             val dataToDeliver = endOffset - startOffset + 1
             val notificationId = target.name.hashCode()
-
-            // 2. Setup Notification
             val manager = context.getSystemService(NotificationManager::class.java)
-            val builder = NotificationCompat.Builder(context, "WebDAV_Service_Channel")
-                .setSmallIcon(android.R.drawable.stat_sys_upload)
-                .setContentTitle("Uploading ${target.name}")
-                .setColor("#2BAED5".toColorInt())
-                .setOngoing(true)
-                .setOnlyAlertOnce(true)
-                .setPriority(NotificationCompat.PRIORITY_LOW)
 
-            // 3. Create the Custom Stream with Progress Logic
+            // 2. Setup Notification ONLY if it is NOT a partial/stream request
+            val builder = if (!isPartial) {
+                NotificationCompat.Builder(context, "WebDAV_Service_Channel")
+                    .setSmallIcon(android.R.drawable.stat_sys_upload)
+                    .setContentTitle("Uploading ${target.name}")
+                    .setColor("#2BAED5".toColorInt())
+                    .setOngoing(true)
+                    .setOnlyAlertOnce(true)
+                    .setPriority(NotificationCompat.PRIORITY_LOW)
+            } else null
+
             val fis = FileInputStream(target)
             if (startOffset > 0) fis.skip(startOffset)
 
@@ -275,13 +275,13 @@ class WebDAVServer(
                     if (bytesRead != -1) {
                         totalBytesRead += bytesRead
 
-                        // Only update if it's a significant size (over 1MB)
-                        if (dataToDeliver > 1024 * 1024) {
+                        // 3. Only update notification if builder exists (isPartial is false)
+                        builder?.let {
                             val percent = (totalBytesRead * 100 / dataToDeliver).toInt()
                             if (percent != lastPercent && percent % 5 == 0) {
-                                builder.setProgress(100, percent, false)
-                                builder.setContentText("${formatSize(totalBytesRead)} / ${formatSize(dataToDeliver)}")
-                                manager?.notify(notificationId, builder.build())
+                                it.setProgress(100, percent, false)
+                                it.setContentText("${formatSize(totalBytesRead)} / ${formatSize(dataToDeliver)}")
+                                manager?.notify(notificationId, it.build())
                                 lastPercent = percent
                             }
                         }
@@ -291,12 +291,11 @@ class WebDAVServer(
 
                 override fun close() {
                     fis.close()
-                    manager?.cancel(notificationId)
+                    if (!isPartial) manager?.cancel(notificationId)
                     super.close()
                 }
             }
 
-            // 4. Send the Response
             val status = if (isPartial) Response.Status.PARTIAL_CONTENT else Response.Status.OK
             val res = newFixedLengthResponse(status, "application/octet-stream", fileStream, dataToDeliver)
 

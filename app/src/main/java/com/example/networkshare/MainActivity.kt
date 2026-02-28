@@ -62,6 +62,11 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import kotlinx.coroutines.CoroutineScope
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlinx.coroutines.launch
+import androidx.compose.ui.composed
 
 class MainActivity : androidx.fragment.app.FragmentActivity() {
     companion object {
@@ -499,6 +504,7 @@ fun DiscoveryScreen(
     val isDark = isSystemInDarkTheme()
     val context = LocalContext.current
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
 
     var showNetworkDialog by remember { mutableStateOf(false) }
 
@@ -597,7 +603,7 @@ fun DiscoveryScreen(
             shape = MaterialTheme.shapes.medium,
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(max = 150.dp),
+                .heightIn(max = 220.dp),
             color = if (isOn) MaterialTheme.colorScheme.surfaceVariant
             else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
         ) {
@@ -605,7 +611,7 @@ fun DiscoveryScreen(
                 LazyColumn(
                     state = listState,
                     modifier = Modifier
-                        .drawScrollbar(listState, color = Color.DarkGray.copy(alpha = 0.6f))
+                        .draggableScrollbar(listState, scope)
                         .padding(16.dp)
                         .graphicsLayer(alpha = if (isOn) 1f else 0.5f)
                 ) {
@@ -772,6 +778,7 @@ fun FilePickerSection(onBack: () -> Unit) {
     }
 
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
 
     val pathParts = remember(currentPath) {
         val parts = mutableListOf<File>()
@@ -910,7 +917,7 @@ fun FilePickerSection(onBack: () -> Unit) {
                 state = listState,
                 modifier = Modifier
                     .fillMaxSize()
-                    .drawScrollbar(listState, color = Color.DarkGray.copy(alpha = 0.6f))
+                    .draggableScrollbar(listState, scope)
                     .graphicsLayer(alpha = if (isLoading) 0f else 1f),
                 contentPadding = PaddingValues(horizontal = 24.dp, vertical = 32.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -1091,40 +1098,61 @@ fun BiometricGateScreen(onUnlockClick: () -> Unit) {
     }
 }
 
-fun Modifier.drawScrollbar(
+fun Modifier.draggableScrollbar(
     state: LazyListState,
-    color: Color = Color(0xFF2BAED5).copy(alpha = 0.6f)
-): Modifier = drawWithContent {
-    drawContent()
+    coroutineScope: CoroutineScope,
+    color: Color = Color.DarkGray.copy(alpha = 0.6f)
+): Modifier = this.composed {
+    // Both blocks below can now see this variable
+    var isPressed by remember { mutableStateOf(false) }
 
-    val layoutInfo = state.layoutInfo
-    val totalItems = layoutInfo.totalItemsCount
+    this.drawWithContent {
+        drawContent()
 
-    if (totalItems > 0 && layoutInfo.visibleItemsInfo.isNotEmpty()) {
-        val viewportHeight = size.height
+        val layoutInfo = state.layoutInfo
+        val totalItems = layoutInfo.totalItemsCount
+        val visibleItems = layoutInfo.visibleItemsInfo
 
-        // 1. Calculate how much of the total content is visible
-        val visibleItemsCount = layoutInfo.visibleItemsInfo.size
-        val scrollbarHeight = (viewportHeight * visibleItemsCount / totalItems).coerceAtLeast(32f)
+        if (visibleItems.size < totalItems) {
+            val viewportHeight = size.height
+            val scrollbarHeight =
+                (viewportHeight * visibleItems.size / totalItems).coerceAtLeast(64f)
 
-        // 2. SMOOTH MATH: Calculate position based on pixel offset, not just item index
-        val firstVisibleItem = layoutInfo.visibleItemsInfo.first()
-        val firstItemOffset = firstVisibleItem.offset.toFloat()
-        val itemHeight = firstVisibleItem.size.toFloat()
+            val scrollProgress = state.firstVisibleItemIndex.toFloat() / totalItems
+            val scrollbarOffsetY = scrollProgress * viewportHeight
 
-        // This creates a fractional progress (e.g., 2.5 instead of just 2)
-        val scrollProgress = (state.firstVisibleItemIndex - (firstItemOffset / itemHeight)) / totalItems
-        val scrollbarOffsetY = scrollProgress * viewportHeight
+            val thickness = if (isPressed) 8.dp.toPx() else 6.dp.toPx()
+            val barColor = if (isPressed) Color(0xFF2BAED5).copy(alpha = 0.6f) else color
+            val marginEnd = 8.dp.toPx()
 
-        // 3. SPACING: Move it away from the edge
-        val thickness = 4.dp.toPx()
-        val marginEnd = 6.dp.toPx() // This pushes it away from the right edge
+            drawRoundRect(
+                color = barColor,
+                topLeft = Offset(
+                    size.width - marginEnd - thickness,
+                    scrollbarOffsetY.coerceIn(0f, viewportHeight - scrollbarHeight)
+                ),
+                size = Size(thickness, scrollbarHeight),
+                cornerRadius = CornerRadius(thickness / 2, thickness / 2)
+            )
+        }
+    }.pointerInput(state) {
+        detectDragGestures(
+            onDragStart = { isPressed = true },
+            onDragEnd = { isPressed = false },
+            onDragCancel = { isPressed = false },
+            onDrag = { change, _ ->
+                change.consume()
+                val totalItems = state.layoutInfo.totalItemsCount
+                if (totalItems > 0) {
+                    val viewportHeight = size.height
+                    val touchY = change.position.y
+                    val targetIndex = ((touchY / viewportHeight) * totalItems).toInt()
 
-        drawRoundRect(
-            color = color,
-            topLeft = Offset(size.width - marginEnd - thickness, scrollbarOffsetY.coerceIn(0f, viewportHeight - scrollbarHeight)),
-            size = Size(thickness, scrollbarHeight),
-            cornerRadius = CornerRadius(thickness / 2, thickness / 2)
+                    coroutineScope.launch {
+                        state.scrollToItem(targetIndex.coerceIn(0, totalItems - 1))
+                    }
+                }
+            }
         )
     }
 }
