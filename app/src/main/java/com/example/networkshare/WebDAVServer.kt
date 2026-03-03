@@ -175,14 +175,14 @@ class WebDAVServer(
             IconResource=C:\Windows\System32\SHELL32.dll,127
         """.trimIndent()
 
-            cleanPath.equals("/SharedItems", ignoreCase = true) -> """
+            cleanPath.equals("/NetworkShare", ignoreCase = true) -> """
             [ViewState]
             Mode=
             Vid=
             FolderType=Generic
             [.ShellClassInfo]
             InfoTip=Contains files and folders that are shared to your network 
-            IconResource=C:\Windows\System32\SHELL32.dll,85
+            IconResource=%SystemRoot%\System32\imageres.dll,42
         """.trimIndent()
 
             else -> """
@@ -272,17 +272,23 @@ class WebDAVServer(
             target.outputStream().use { output ->
                 val buffer = ByteArray(65536)
                 var totalRead = 0L
+                var lastUpdateTime = 0L // Track the time
+
                 while (totalRead < contentLength) {
                     val read = inputStream.read(buffer)
                     if (read == -1) break
                     output.write(buffer, 0, read)
                     totalRead += read
 
-                    val percent = (totalRead * 100 / contentLength).toInt()
-                    if (percent % 5 == 0) {
+                    val currentTime = System.currentTimeMillis()
+                    // Check if 1 second (1000ms) has passed since the last update
+                    if (currentTime - lastUpdateTime >= 500) {
+                        val percent = (totalRead * 100 / contentLength).toInt()
                         builder.setProgress(100, percent, false)
                         builder.setContentText("${formatSize(totalRead)} / ${formatSize(contentLength)}")
                         manager?.notify(target.name.hashCode(), builder.build())
+
+                        lastUpdateTime = currentTime // Reset the timer
                     }
                 }
             }
@@ -419,7 +425,7 @@ class WebDAVServer(
 
             val fileStream = object : FileInputStream(fis.fd) {
                 var totalBytesRead = 0L
-                var lastPercent = -1
+                var lastUpdateTime = 0L // Track the time
 
                 override fun read(b: ByteArray, off: Int, len: Int): Int {
                     val maxToRead = min(len.toLong(), dataToDeliver - totalBytesRead).toInt()
@@ -429,14 +435,16 @@ class WebDAVServer(
                     if (bytesRead != -1) {
                         totalBytesRead += bytesRead
 
-                        // 3. Only update notification if builder exists (isPartial is false)
                         builder?.let {
-                            val percent = (totalBytesRead * 100 / dataToDeliver).toInt()
-                            if (percent != lastPercent && percent % 5 == 0) {
+                            val currentTime = System.currentTimeMillis()
+                            // static/member variable to track time in the anonymous object
+                            if (currentTime - lastUpdateTime >= 500) {
+                                val percent = (totalBytesRead * 100 / dataToDeliver).toInt()
                                 it.setProgress(100, percent, false)
                                 it.setContentText("${formatSize(totalBytesRead)} / ${formatSize(dataToDeliver)}")
                                 manager?.notify(notificationId, it.build())
-                                lastPercent = percent
+
+                                lastUpdateTime = currentTime
                             }
                         }
                     }
@@ -521,7 +529,7 @@ class WebDAVServer(
                 <D:displayname>$safeDisplayName</D:displayname>
                 <D:getcontentlength>${if (isDir) 0 else file.length()}</D:getcontentlength>
                 <D:resourcetype>${if (isDir) "<D:collection/>" else ""}</D:resourcetype>
-                <Z:Win32FileAttributes>0x00000001</Z:Win32FileAttributes>
+                <Z:Win32FileAttributes>0x00000004</Z:Win32FileAttributes>
                 <D:getlastmodified>${sdf.format(Date(file.lastModified()))}</D:getlastmodified>
                 <D:creationdate>$creationDate</D:creationdate>
                 <D:getetag>$etag</D:getetag>

@@ -434,38 +434,67 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     private fun saveUriToSharedFolder(uri: android.net.Uri) {
         try {
             val rootDir = Environment.getExternalStorageDirectory()
-            val sharedDir = File(rootDir, "SharedItems")
+            val networkShareDir = File(rootDir, "NetworkShare")
 
-            if (!sharedDir.exists()) {
-                val created = sharedDir.mkdirs()
+            if (!networkShareDir.exists()) {
+                val created = networkShareDir.mkdirs()
                 if (!created) {
                     Log.e("NetworkShare", "Could not create root folder, check permissions")
                 }
             }
 
+            // 1. Get File Name and Extension
             val fileName = getFileName(uri) ?: "shared_${System.currentTimeMillis()}"
-            val destFile = File(sharedDir, fileName)
+            val extension = fileName.substringAfterLast('.', "").lowercase()
 
+            val isDirectory = contentResolver.getType(uri) == "vnd.android.cursor.item/directory"
+            val subFolder = when {
+                isDirectory -> "Folders"
+
+                // Apps: APK, EXE
+                extension in listOf("apk", "exe") -> "Apps"
+
+                // Audio: MP3, WAV, M4A, etc.
+                extension in listOf("mp3", "wav", "m4a", "flac", "ogg") -> "Audio"
+
+                // Video: MP4, MKV, MOV, etc.
+                extension in listOf("mp4", "mkv", "mov", "avi", "webm") -> "Video"
+
+                // Pictures: JPG, PNG, GIF, etc.
+                extension in listOf("jpg", "jpeg", "png", "gif", "webp", "bmp") -> "Pictures"
+
+                // Documents: PDF, DOCX, TXT, etc.
+                extension in listOf("pdf", "doc", "docx", "txt", "xls", "xlsx", "ppt", "pptx") -> "Documents"
+
+                // Default for everything else
+                else -> "Others"
+            }
+
+            val targetDir = File(networkShareDir, subFolder)
+            if (!targetDir.exists()) {
+                targetDir.mkdirs()
+            }
+
+            val destFile = File(targetDir, fileName)
+
+            // 3. Copy the file
             contentResolver.openInputStream(uri)?.use { input ->
                 destFile.outputStream().use { output ->
                     input.copyTo(output)
                 }
             }
 
-            val path = sharedDir.absolutePath
+            // Update WebDAV logic
+            val path = networkShareDir.absolutePath
             if (!WebDAVService.selectedPaths.contains(path)) {
                 WebDAVService.selectedPaths.add(path)
                 WebDAVService.savePaths(this)
             }
-
             WebDAVService.tempPriorityPath = path
 
-            Toast.makeText(this, "New item added to SharedItems!", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Shared on NetworkShare", Toast.LENGTH_SHORT).show()
 
-            val refreshIntent = Intent(this, WebDAVService::class.java).apply {
-                action = "REFRESH_INFO"
-            }
-            startService(refreshIntent)
+            startService(Intent(this, WebDAVService::class.java).apply { action = "REFRESH_INFO" })
 
         } catch (e: Exception) {
             Log.e("NetworkShare", "Error: ${e.message}")
