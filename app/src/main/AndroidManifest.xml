@@ -26,6 +26,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.NetworkShare"
         tools:targetApi="30">
+        <receiver android:name=".TransferCancelReceiver" android:exported="false" />
         <service 
         android:name=".WebDAVService"
         android:foregroundServiceType="dataSync"

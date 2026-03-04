@@ -1,6 +1,5 @@
 package com.example.networkshare
 
-import android.annotation.SuppressLint
 import android.content.Context
 import android.util.Log
 import fi.iki.elonen.NanoHTTPD
@@ -9,12 +8,7 @@ import java.io.FileInputStream
 import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.*
-import android.app.NotificationManager
-import androidx.core.app.NotificationCompat
-import androidx.core.graphics.toColorInt
-import kotlin.math.log10
 import kotlin.math.min
-import kotlin.math.pow
 import kotlin.text.Charsets
 import java.util.UUID
 
@@ -22,7 +16,8 @@ class WebDAVServer(
     val port: Int,
     val rootDirectory: File,
     private val context: Context,
-    private val allowedPaths: List<String>
+    private val allowedPaths: List<String>,
+    private val listener: TransferListener
 ) : NanoHTTPD(port) {
 
     private val tag = "WebDAVServer:$port"
@@ -246,28 +241,11 @@ class WebDAVServer(
         }
     }
 
-    @SuppressLint("DefaultLocale")
-    fun formatSize(bytes: Long): String {
-        if (bytes <= 0) return "0 B"
-        val units = arrayOf("B", "KB", "MB", "GB", "TB")
-        val digitGroups = (log10(bytes.toDouble()) / log10(1024.0)).toInt()
-        return String.format("%.1f %s", bytes / 1024.0.pow(digitGroups.toDouble()), units[digitGroups])
-    }
-
     private fun handlePut(session: IHTTPSession, target: File): Response {
         return try {
             target.parentFile?.mkdirs()
             val inputStream = session.inputStream
             val contentLength = session.headers["content-length"]?.toLong() ?: 0L
-
-            val manager = context.getSystemService(NotificationManager::class.java)
-            val builder = NotificationCompat.Builder(context, "WebDAV_Service_Channel")
-                .setSmallIcon(android.R.drawable.stat_sys_download)
-                .setContentTitle("Downloading ${target.name}")
-                .setColor("#2BAED5".toColorInt())
-                .setOngoing(true)
-                .setOnlyAlertOnce(true)
-                .setPriority(NotificationCompat.PRIORITY_LOW)
 
             target.outputStream().use { output ->
                 val buffer = ByteArray(65536)
@@ -275,6 +253,10 @@ class WebDAVServer(
                 var lastUpdateTime = 0L // Track the time
 
                 while (totalRead < contentLength) {
+                    if (WebDAVService.isCancelled(target.name)) {
+                        WebDAVService.clearCancel(target.name)
+                        throw IOException("Transfer cancelled by user") // This stops the thread and closes the file
+                    }
                     val read = inputStream.read(buffer)
                     if (read == -1) break
                     output.write(buffer, 0, read)
@@ -283,16 +265,12 @@ class WebDAVServer(
                     val currentTime = System.currentTimeMillis()
                     // Check if 1 second (1000ms) has passed since the last update
                     if (currentTime - lastUpdateTime >= 500) {
-                        val percent = (totalRead * 100 / contentLength).toInt()
-                        builder.setProgress(100, percent, false)
-                        builder.setContentText("${formatSize(totalRead)} / ${formatSize(contentLength)}")
-                        manager?.notify(target.name.hashCode(), builder.build())
-
+                        listener.onTransferProgress(target.name, totalRead, contentLength, true)
                         lastUpdateTime = currentTime // Reset the timer
                     }
                 }
             }
-            manager?.cancel(target.name.hashCode())
+            listener.onTransferComplete(target.name)
             newFixedLengthResponse(Response.Status.CREATED, MIME_PLAINTEXT, "")
         } catch (e: Exception) {
             newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, e.message)
@@ -405,19 +383,6 @@ class WebDAVServer(
             }
 
             val dataToDeliver = endOffset - startOffset + 1
-            val notificationId = target.name.hashCode()
-            val manager = context.getSystemService(NotificationManager::class.java)
-
-            // 2. Setup Notification ONLY if it is NOT a partial/stream request
-            val builder = if (!isPartial) {
-                NotificationCompat.Builder(context, "WebDAV_Service_Channel")
-                    .setSmallIcon(android.R.drawable.stat_sys_upload)
-                    .setContentTitle("Uploading ${target.name}")
-                    .setColor("#2BAED5".toColorInt())
-                    .setOngoing(true)
-                    .setOnlyAlertOnce(true)
-                    .setPriority(NotificationCompat.PRIORITY_LOW)
-            } else null
 
             val fis = FileInputStream(target)
             if (startOffset > 0) fis.skip(startOffset)
@@ -428,6 +393,10 @@ class WebDAVServer(
                 var lastUpdateTime = 0L // Track the time
 
                 override fun read(b: ByteArray, off: Int, len: Int): Int {
+                    if (WebDAVService.isCancelled(target.name)) {
+                        WebDAVService.clearCancel(target.name)
+                        throw IOException("Transfer cancelled by user") // This stops the thread and closes the file
+                    }
                     val maxToRead = min(len.toLong(), dataToDeliver - totalBytesRead).toInt()
                     if (maxToRead <= 0) return -1
 
@@ -435,14 +404,11 @@ class WebDAVServer(
                     if (bytesRead != -1) {
                         totalBytesRead += bytesRead
 
-                        builder?.let {
+                        if (!isPartial) {
                             val currentTime = System.currentTimeMillis()
                             // static/member variable to track time in the anonymous object
                             if (currentTime - lastUpdateTime >= 500) {
-                                val percent = (totalBytesRead * 100 / dataToDeliver).toInt()
-                                it.setProgress(100, percent, false)
-                                it.setContentText("${formatSize(totalBytesRead)} / ${formatSize(dataToDeliver)}")
-                                manager?.notify(notificationId, it.build())
+                                listener.onTransferProgress(target.name, totalBytesRead, dataToDeliver, false)
 
                                 lastUpdateTime = currentTime
                             }
@@ -453,14 +419,16 @@ class WebDAVServer(
 
                 override fun close() {
                     fis.close()
-                    if (!isPartial) manager?.cancel(notificationId)
+                    if (!isPartial) {
+                        listener.onTransferComplete(target.name)
+                    }
                     super.close()
 
                     if (!isPartial && totalBytesRead < dataToDeliver) {
                         Log.w(tag, "Transfer failed/interrupted at $totalBytesRead/$dataToDeliver bytes. Safety lock maintained.")
                         PersistenceGuard.markStarted(context, path)
                     } else if (!isPartial && totalBytesRead == dataToDeliver) {
-                        Log.d(tag, "Transfer completed successfully. File is now safe to be moved/deleted.")
+                        Log.d(tag, "Transfer completed successfully. File is now safe to be deleted.")
                     }
                 }
             }
@@ -541,4 +509,9 @@ class WebDAVServer(
     }
 
     fun stopServer() = stop()
+}
+
+interface TransferListener {
+    fun onTransferProgress(fileName: String, currentBytes: Long, totalBytes: Long, isDownload: Boolean)
+    fun onTransferComplete(fileName: String)
 }

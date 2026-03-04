@@ -13,6 +13,9 @@ import java.io.File
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import androidx.core.content.edit
+import android.annotation.SuppressLint
+import android.app.NotificationManager
+import java.util.Collections
 
 data class FolderItem(
     val file: File,
@@ -20,7 +23,7 @@ data class FolderItem(
     val hasSubFolders: Boolean
 )
 
-class WebDAVService : Service() {
+class WebDAVService : Service(), TransferListener {
 
     private val activeServers = mutableListOf<WebDAVServer>()
     private val channelId = "WebDAV_Service_Channel"
@@ -145,6 +148,55 @@ class WebDAVService : Service() {
         manager?.notify(fileName.hashCode(), builder.build())
     }
 
+    // --- Progress Notification Logic ---
+    override fun onTransferProgress(fileName: String, currentBytes: Long, totalBytes: Long, isDownload: Boolean) {
+        val notificationId = fileName.hashCode()
+        val manager = getSystemService(NotificationManager::class.java)
+
+        val cancelIntent = Intent(this, TransferCancelReceiver::class.java).apply {
+            putExtra("file_name", fileName)
+        }
+        val pendingCancel = PendingIntent.getBroadcast(
+            this, notificationId, cancelIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val percent = if (totalBytes > 0L) {
+            ((currentBytes * 100L) / totalBytes).toInt()
+        } else 0
+
+        val builder = NotificationCompat.Builder(this, channelId)
+            .setSmallIcon(if (isDownload) android.R.drawable.stat_sys_download else android.R.drawable.stat_sys_upload)
+            .setContentTitle(if (isDownload) "Downloading $fileName" else "Uploading $fileName")
+            .setColor("#2BAED5".toColorInt())
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setProgress(100, percent, false)
+            .setContentText("${formatSize(currentBytes)} / ${formatSize(totalBytes)}")
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "CANCEL", pendingCancel)
+
+        manager?.notify(notificationId, builder.build())
+    }
+
+    override fun onTransferComplete(fileName: String) {
+        val manager = getSystemService(NotificationManager::class.java)
+        manager?.cancel(fileName.hashCode())
+    }
+
+    @SuppressLint("DefaultLocale")
+    fun formatSize(bytes: Long): String {
+        if (bytes <= 0) return "0 B"
+        val units = arrayOf("B", "KB", "MB", "GB", "TB")
+        var size = bytes.toDouble()
+        var unitIndex = 0
+        while (size >= 1024 && unitIndex < units.size - 1) {
+            size /= 1024
+            unitIndex++
+        }
+        return String.format("%.2f %s", size, units[unitIndex])
+    }
+
     private fun startWebDAVServers() {
         activeServers.forEach { it.stopServer() }
         activeServers.clear()
@@ -177,7 +229,7 @@ class WebDAVService : Service() {
 
                 if (nextPort <= maxPort) {
                     try {
-                        activeServers.add(WebDAVServer(nextPort, root, this, allowedInThisRoot))
+                        activeServers.add(WebDAVServer(nextPort, root, this, allowedInThisRoot, this))
                         nextPort++
                     } catch (e: Exception) {
                         Log.e(tag, "Failed to start server for ${root.absolutePath}: ${e.message}")
@@ -334,6 +386,19 @@ class WebDAVService : Service() {
     }
 
     companion object {
+        private val cancelledFiles = Collections.synchronizedSet(mutableSetOf<String>())
+
+        fun cancelTransfer(fileName: String) {
+            cancelledFiles.add(fileName)
+        }
+
+        fun isCancelled(fileName: String): Boolean {
+            return cancelledFiles.contains(fileName)
+        }
+
+        fun clearCancel(fileName: String) {
+            cancelledFiles.remove(fileName)
+        }
         var scannedItems = mutableStateListOf<FolderItem>()
         var isScanning = mutableStateOf(false)
         var selectedPaths = mutableStateListOf<String>()
@@ -391,5 +456,13 @@ class WebDAVService : Service() {
                 }
             }.start()
         }
+    }
+}
+
+class TransferCancelReceiver : android.content.BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        val fileName = intent.getStringExtra("file_name") ?: return
+        // Tell the Service to stop this specific file
+        WebDAVService.cancelTransfer(fileName)
     }
 }
