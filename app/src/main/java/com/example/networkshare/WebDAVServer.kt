@@ -19,7 +19,7 @@ class WebDAVServer(
     private val allowedPaths: List<String>,
     private val listener: TransferListener
 ) : NanoHTTPD(port) {
-
+    private var isShuttingDown = false
     private val tag = "WebDAVServer:$port"
 
     init {
@@ -32,6 +32,10 @@ class WebDAVServer(
     }
 
     override fun serve(session: IHTTPSession): Response {
+        if (isShuttingDown) {
+            return newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Server is shutting down.")
+        }
+
         val uri = session.uri
         val method = session.method
 
@@ -242,12 +246,15 @@ class WebDAVServer(
     }
 
     private fun handlePut(session: IHTTPSession, target: File): Response {
+        // 1. Create a temporary file (e.g., filename.ext.tmp)
+        val tempFile = File(target.parentFile, "${target.name}.${UUID.randomUUID()}.tmp")
+
         return try {
             target.parentFile?.mkdirs()
             val inputStream = session.inputStream
             val contentLength = session.headers["content-length"]?.toLong() ?: 0L
 
-            target.outputStream().use { output ->
+            tempFile.outputStream().use { output ->
                 val buffer = ByteArray(65536)
                 var totalRead = 0L
                 var lastUpdateTime = 0L // Track the time
@@ -255,25 +262,43 @@ class WebDAVServer(
                 while (totalRead < contentLength) {
                     if (WebDAVService.isCancelled(target.name)) {
                         WebDAVService.clearCancel(target.name)
-                        throw IOException("Transfer cancelled by user") // This stops the thread and closes the file
+                        // Delete the temp file if user cancels
+                        tempFile.delete()
+                        return newFixedLengthResponse(Response.Status.FORBIDDEN, MIME_PLAINTEXT, "Transfer cancelled by user.") // This stops the thread and closes the file
                     }
+
                     val read = inputStream.read(buffer)
                     if (read == -1) break
                     output.write(buffer, 0, read)
                     totalRead += read
 
                     val currentTime = System.currentTimeMillis()
-                    // Check if 1 second (1000ms) has passed since the last update
                     if (currentTime - lastUpdateTime >= 500) {
                         listener.onTransferProgress(target.name, totalRead, contentLength, true)
-                        lastUpdateTime = currentTime // Reset the timer
+                        lastUpdateTime = currentTime
                     }
                 }
             }
-            listener.onTransferComplete(target.name)
-            newFixedLengthResponse(Response.Status.CREATED, MIME_PLAINTEXT, "")
+
+            // 2. Critical Step: Verify and Rename
+            // If we reached here, the stream finished. Now replace the old file.
+            if (tempFile.length() == contentLength || contentLength == 0L) {
+                if (target.exists()) target.delete() // Remove the old version
+                if (tempFile.renameTo(target)) {
+                    newFixedLengthResponse(Response.Status.CREATED, MIME_PLAINTEXT, "")
+                } else {
+                    throw IOException("Failed to move temp file to destination")
+                }
+            } else {
+                tempFile.delete()
+                newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Transfer incomplete")
+            }
+
         } catch (e: Exception) {
+            if (tempFile.exists()) tempFile.delete() // Clean up on error
             newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, e.message)
+        } finally {
+            listener.onTransferComplete(target.name)
         }
     }
 
@@ -482,12 +507,38 @@ class WebDAVServer(
     private fun getFilePropertiesXml(file: File, uri: String): String {
         val isDir = file.isDirectory
         val sdf = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss z", Locale.US).apply { timeZone = TimeZone.getTimeZone("GMT") }
-        // Windows loves this specific format for creation dates
         val creationDate = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("GMT") }.format(Date(file.lastModified()))
         val etag = "\"${file.lastModified()}-${file.length()}\""
 
         val safeDisplayName = file.name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         val safeUri = uri.split("/").joinToString("/") { java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
+
+        // 1. Define the Android folder path
+        val androidDir = File(rootDirectory, "Android").absolutePath
+        val currentPath = file.absolutePath
+
+        // 2. Check if this IS the Android folder or INSIDE it
+        val isWithinAndroid = currentPath == androidDir || currentPath.startsWith("$androidDir/")
+
+        // 3. Check if this is a top-level root folder (for icons)
+        val isRootChild = file.parentFile?.absolutePath == rootDirectory.absolutePath
+
+        // List of folders allowed to have custom Windows Icons
+        val iconFolders = listOf("DCIM", "Documents", "Download", "Movies", "Music", "NetworkShare", "Pictures")
+
+        val attributes = when {
+            // 1. Android folder tree: System
+            isWithinAndroid -> "0x00000004"
+
+            // 2. Specific Root Folders: ReadOnly (to trigger desktop.ini check)
+            isDir && isRootChild && iconFolders.any { it.equals(file.name, ignoreCase = true) } -> "0x00000001"
+
+            // 3. Any other directory: Standard Directory attribute
+            isDir -> "0x00000010"
+
+            // 4. Everything else: Normal Archive file
+            else -> "0x00000020"
+        }
 
         return """
     <D:response xmlns:Z="urn:schemas-microsoft-com:">
@@ -497,7 +548,7 @@ class WebDAVServer(
                 <D:displayname>$safeDisplayName</D:displayname>
                 <D:getcontentlength>${if (isDir) 0 else file.length()}</D:getcontentlength>
                 <D:resourcetype>${if (isDir) "<D:collection/>" else ""}</D:resourcetype>
-                <Z:Win32FileAttributes>0x00000004</Z:Win32FileAttributes>
+                <Z:Win32FileAttributes>$attributes</Z:Win32FileAttributes>
                 <D:getlastmodified>${sdf.format(Date(file.lastModified()))}</D:getlastmodified>
                 <D:creationdate>$creationDate</D:creationdate>
                 <D:getetag>$etag</D:getetag>
@@ -505,10 +556,14 @@ class WebDAVServer(
             <D:status>HTTP/1.1 200 OK</D:status>
         </D:propstat>
     </D:response>
-""".trimIndent()
+    """.trimIndent()
     }
 
-    fun stopServer() = stop()
+    fun stopServer() {
+        isShuttingDown = true
+        Thread.sleep(500)
+        stop()
+    }
 }
 
 interface TransferListener {
