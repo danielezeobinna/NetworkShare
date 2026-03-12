@@ -184,15 +184,16 @@ class WebDAVServer(
     private val context: Context,
     private val allowedPaths: List<String>,
     private val listener: TransferListener,
-    username: String = "user",
-    password: String  = "pass"
 ) : NanoHTTPD(port) {
 
     private var isShuttingDown = false
     private val tag = "WebDAVServer:$port"
 
     init {
-        DigestAuthManager.setCredentials(username, password)
+        DigestAuthManager.setCredentials(
+            WebDAVService.username.value,
+            WebDAVService.password.value
+        )
         try {
             start(SOCKET_READ_TIMEOUT, false)
             Log.d(tag, "Server started at ${rootDirectory.absolutePath}")
@@ -222,7 +223,7 @@ class WebDAVServer(
 
         // OPTIONS must always pass unauthenticated – Windows probes this first
         // before it even has credentials to send.
-        if (session.method != Method.OPTIONS) {
+        if (session.method != Method.OPTIONS && WebDAVService.isAuthEnabled.value) {
             val sessionKey = "${session.remoteIpAddress}|${session.headers["user-agent"]}"
             val authHeader = session.headers["authorization"] ?: ""
 

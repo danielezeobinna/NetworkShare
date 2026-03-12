@@ -64,9 +64,26 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import kotlinx.coroutines.CoroutineScope
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.input.pointer.pointerInput
 import kotlinx.coroutines.launch
 import androidx.compose.ui.composed
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 
 class MainActivity : androidx.fragment.app.FragmentActivity() {
     companion object {
@@ -125,7 +142,6 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
         enableEdgeToEdge()
         WebDAVService.loadPaths(this)
         handleIncomingShare(intent)
@@ -534,6 +550,19 @@ fun DiscoveryScreen(
     val context = LocalContext.current
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    var isEditing by remember { mutableStateOf(false) }
+    var passwordVisible by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
+    val focusRequester = remember { FocusRequester() }
+    val softwareKeyboardController = LocalSoftwareKeyboardController.current
+
+// Keep track of the text at the moment they clicked "Edit"
+    var originalUsername by remember { mutableStateOf("") }
+    var originalPassword by remember { mutableStateOf("") }
+
+// Check if current text is different from what we started with
+    val hasChanged = WebDAVService.username.value != originalUsername ||
+            WebDAVService.password.value != originalPassword
 
     var showNetworkDialog by remember { mutableStateOf(false) }
 
@@ -549,6 +578,16 @@ fun DiscoveryScreen(
             .fillMaxSize()
             .statusBarsPadding()
             .padding(24.dp)
+            .pointerInput(Unit) {
+                detectTapGestures(onTap = {
+                    if (isEditing) {
+                        WebDAVService.username.value = originalUsername
+                        WebDAVService.password.value = originalPassword
+                        isEditing = false
+                    }
+                    focusManager.clearFocus()
+                })
+            }
     ) {
         Spacer(modifier = Modifier.height(24.dp))
         Row(
@@ -666,6 +705,233 @@ fun DiscoveryScreen(
                                 top = 2.dp
                             )
                         )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(48.dp))
+        Text(
+            text = "Network Security",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(bottom = 8.dp),
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Surface(
+            tonalElevation = 4.dp,
+            shape = MaterialTheme.shapes.medium,
+            modifier = Modifier
+                .fillMaxWidth(),
+            color = MaterialTheme.colorScheme.surfaceVariant
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .fillMaxWidth()
+
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Digest Authentication",
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontSize = 16.sp
+                        )
+                    }
+
+                    Switch(
+                        checked = WebDAVService.isAuthEnabled.value,
+                        onCheckedChange = {
+                            WebDAVService.isAuthEnabled.value = it
+                            if (!it) {
+                                // Turning auth OFF → stop the service
+                                onToggle(false) { WebDAVService.isAuthEnabled.value = true }
+                            } else {
+                                // Turning auth ON → just update the flag, don't touch the service
+                                WebDAVService.savePaths(context)
+                            }
+                        },
+                        enabled = true,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = if (isDark) Color.Black else Color.White,
+                            uncheckedThumbColor = if (isDark) Color.White else Color(0xFF666660),
+
+                            uncheckedTrackColor = if (isDark) Color(0xFF666660) else Color(
+                                0xFFEEF1F3
+                            ),
+
+                            uncheckedBorderColor = Color(0xFF666660)
+                        )
+                    )
+                }
+
+                AnimatedVisibility(
+                    visible = WebDAVService.isAuthEnabled.value,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    Column {
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        // Edit button
+                        Row(
+                            horizontalArrangement = Arrangement.End,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            TextButton(
+                                onClick = {
+                                    if (!isEditing) {
+                                        // Start Editing: Capture the current values
+                                        originalUsername = WebDAVService.username.value
+                                        originalPassword = WebDAVService.password.value
+                                        isEditing = true
+                                    } else {
+                                        // Save & Close: Keep the new values and close
+                                        isEditing = false
+                                        focusManager.clearFocus()
+                                        WebDAVService.savePaths(context)
+                                    }
+                                },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    val label =
+                                        if (isEditing && hasChanged) "Done" else if (isEditing) "Close" else "Edit"
+                                    Text(
+                                        text = label,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = Color(0xFF2BAED5)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Icon(
+                                        painter = painterResource(
+                                            id = if (isEditing && hasChanged) R.drawable.baseline_check else if (isEditing) R.drawable.baseline_close else R.drawable.baseline_edit
+                                        ),
+                                        contentDescription = if (isEditing) "Save" else "Edit",
+                                        modifier = Modifier.size(if (isEditing) 16.dp else 24.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        // Username Row
+                        LaunchedEffect(isEditing) {
+                            if (isEditing) {
+                                focusRequester.requestFocus()
+                                softwareKeyboardController?.show()
+                            }
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = "Username",
+                                color = Color(0xFF2BAED5),
+                                fontSize = 16.sp,
+                                modifier = Modifier.width(90.dp)
+                            )
+                            BasicTextField(
+                                value = WebDAVService.username.value,
+                                onValueChange = { WebDAVService.username.value = it },
+                                enabled = isEditing,
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                keyboardActions = KeyboardActions(
+                                    onDone = {
+                                        // Software Keyboard 'Check' counts as Saving
+                                        isEditing = false
+                                        focusManager.clearFocus()
+                                        WebDAVService.savePaths(context)
+                                    }
+                                ),
+                                textStyle = LocalTextStyle.current.copy(
+                                    fontSize = 16.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                ),
+                                cursorBrush = SolidColor(Color(0xFF2BAED5)),
+                                singleLine = true,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .focusRequester(focusRequester)
+                            )
+                        }
+                        HorizontalDivider(
+                            modifier = Modifier
+                                .offset(y = 4.dp)
+                                .padding(start = 90.dp)
+                                .padding(end = 16.dp)
+                                .padding(top = 8.dp),
+                            thickness = 0.5.dp,
+                            color = Color.Gray.copy(alpha = 0.3f)
+                        )
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // Password Row
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                                .padding(bottom = 16.dp)
+                        ) {
+                            Text(
+                                text = "Password",
+                                color = Color(0xFF2BAED5),
+                                fontSize = 16.sp,
+                                modifier = Modifier.width(90.dp)
+                            )
+                            BasicTextField(
+                                value = WebDAVService.password.value,
+                                onValueChange = { WebDAVService.password.value = it },
+                                enabled = isEditing,
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                keyboardActions = KeyboardActions(
+                                    onDone = {
+                                        // Software Keyboard 'Check' counts as Saving
+                                        isEditing = false
+                                        focusManager.clearFocus()
+                                        WebDAVService.savePaths(context)
+                                    }
+                                ),
+                                textStyle = LocalTextStyle.current.copy(
+                                    fontSize = 16.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                ),
+                                cursorBrush = SolidColor(Color(0xFF2BAED5)),
+                                singleLine = true,
+                                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                                modifier = Modifier.weight(1f)
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .padding(start = 8.dp)
+                                    .pointerInput(Unit) {
+                                        detectTapGestures(
+                                            onPress = {
+                                                passwordVisible = true
+                                                tryAwaitRelease() // Wait for finger to lift
+                                                passwordVisible = false
+                                            }
+                                        )
+                                    }
+                            ) {
+                                Icon(
+                                    painter = painterResource(
+                                        id = if (passwordVisible) R.drawable.baseline_visibility else R.drawable.baseline_visibility_off
+                                    ),
+                                    contentDescription = "Reveal password",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }

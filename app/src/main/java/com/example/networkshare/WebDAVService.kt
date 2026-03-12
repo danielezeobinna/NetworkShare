@@ -386,6 +386,9 @@ class WebDAVService : Service(), TransferListener {
     }
 
     companion object {
+        var isAuthEnabled = mutableStateOf(true)
+        var username = mutableStateOf("user")
+        var password = mutableStateOf("pass")
         private val cancelledFiles = Collections.synchronizedSet(mutableSetOf<String>())
 
         fun cancelTransfer(fileName: String) {
@@ -408,12 +411,18 @@ class WebDAVService : Service(), TransferListener {
         fun savePaths(context: Context) {
             val prefs = context.getSharedPreferences("network_share_prefs", MODE_PRIVATE)
             prefs.edit{
+                putBoolean("auth_enabled", isAuthEnabled.value)
+                putString("username", username.value)
+                putString("password", password.value)
                 putStringSet("shared_paths", selectedPaths.toSet())
             }
         }
 
         fun loadPaths(context: Context) {
             val prefs = context.getSharedPreferences("network_share_prefs", MODE_PRIVATE)
+            isAuthEnabled.value = prefs.getBoolean("auth_enabled", true)
+            username.value = prefs.getString("username", "user") ?: "user"
+            password.value = prefs.getString("password", "pass") ?: "pass"
             val saved = prefs.getStringSet("shared_paths", emptySet())
             selectedPaths.clear()
             selectedPaths.addAll(saved ?: emptySet())
