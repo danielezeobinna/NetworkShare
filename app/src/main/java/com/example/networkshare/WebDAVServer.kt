@@ -12,6 +12,7 @@ import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.min
 import kotlin.text.Charsets
+import android.os.Build
 
 // ─────────────────────────────────────────────────────────────
 //  Digest Auth Manager (embedded)
@@ -219,6 +220,36 @@ class WebDAVServer(
     private fun serveInternal(session: IHTTPSession): Response {
         if (isShuttingDown) {
             return newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Server is shutting down.")
+        }
+
+        // Network trust enforcement
+        val wifiManager = context.applicationContext
+            .getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager
+        val connectivityManager = context.applicationContext
+            .getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+
+        val ssid = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val network = connectivityManager.activeNetwork ?: return newFixedLengthResponse(
+                Response.Status.FORBIDDEN, MIME_PLAINTEXT, "Network not trusted."
+            )
+            val caps = connectivityManager.getNetworkCapabilities(network)
+            val info = caps?.transportInfo as? android.net.wifi.WifiInfo
+            info?.ssid?.removeSurrounding("\"") ?: ""
+        } else {
+            @Suppress("DEPRECATION")
+            wifiManager.connectionInfo.ssid?.removeSurrounding("\"") ?: ""
+        }
+
+        if (!NetworkTrustManager.isHotspot(ssid)) {
+            val trust = NetworkTrustManager.getTrust(ssid)
+            if (trust == NetworkTrustManager.Trust.BLOCKED ||
+                trust == NetworkTrustManager.Trust.UNKNOWN) {
+                return newFixedLengthResponse(
+                    Response.Status.FORBIDDEN,
+                    MIME_PLAINTEXT,
+                    "Network not trusted."
+                )
+            }
         }
 
         // OPTIONS must always pass unauthenticated – Windows probes this first

@@ -161,16 +161,34 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 
                         else -> {
                             val isPickerOpen = remember { mutableStateOf(false) }
-                            if (!isPickerOpen.value) {
-                                DiscoveryScreen(
+                            val showAllowedNetworks = remember { mutableStateOf(false) }  // ← add
+                            val showBlockedNetworks = remember { mutableStateOf(false) }  // ← add
+
+                            when {
+                                showAllowedNetworks.value -> NetworkListScreen(
+                                    title = "Allowed Networks",
+                                    networks = NetworkTrustManager.allowedNetworks,
+                                    iconRes = R.drawable.ic_wifi,
+                                    onRemove = { ssid -> NetworkTrustManager.remove(this, ssid) },
+                                    onBack = { showAllowedNetworks.value = false }
+                                )
+                                showBlockedNetworks.value -> NetworkListScreen(
+                                    title = "Blocked Networks",
+                                    networks = NetworkTrustManager.blockedNetworks,
+                                    iconRes = R.drawable.ic_wifi,
+                                    onRemove = { ssid -> NetworkTrustManager.remove(this, ssid) },
+                                    onBack = { showBlockedNetworks.value = false }
+                                )
+                                !isPickerOpen.value -> DiscoveryScreen(
                                     isOn = isDiscoveryOn,
                                     isPending = isPending,
                                     addresses = serverAddresses,
                                     onToggle = { start, showDialog -> handleToggle(start, showDialog) },
-                                    onOpenPicker = { isPickerOpen.value = true }
+                                    onOpenPicker = { isPickerOpen.value = true },
+                                    onOpenAllowedNetworks = { showAllowedNetworks.value = true },   // ← add
+                                    onOpenBlockedNetworks = { showBlockedNetworks.value = true }    // ← add
                                 )
-                            } else {
-                                FilePickerSection(onBack = { isPickerOpen.value = false })
+                                else -> FilePickerSection(onBack = { isPickerOpen.value = false })
                             }
                         }
                     }
@@ -544,6 +562,8 @@ fun DiscoveryScreen(
     addresses: String,
     onToggle: (Boolean, () -> Unit) -> Unit,
     onOpenPicker: () -> Unit,
+    onOpenAllowedNetworks: () -> Unit,
+    onOpenBlockedNetworks: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val isDark = isSystemInDarkTheme()
@@ -625,39 +645,35 @@ fun DiscoveryScreen(
             )
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(8.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.End
         ) {
-            Row(
-                modifier = Modifier
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = ripple(color = Color.DarkGray),
-                        onClick = onOpenPicker
-                    )
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.End
+            TextButton(
+                onClick = onOpenPicker,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
             ) {
-                Image(
-                    painter = painterResource(id = R.drawable.ic_sp),
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp)
-                )
-
-                Spacer(modifier = Modifier.width(4.dp))
-
-                Text(
-                    text = "Choose Shared Paths...",
-                    fontSize = 16.sp,
-                    color = MaterialTheme.colorScheme.primary
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Image(
+                        painter = painterResource(id = R.drawable.ic_sp),
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "Choose Shared Paths...",
+                        fontSize = 16.sp,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = Color(0xFF2BAED5)
+                    )
+                }
             }
         }
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(8.dp))
         Text(
             text = "Windows Explorer Addresses:",
             fontSize = 14.sp,
@@ -671,7 +687,7 @@ fun DiscoveryScreen(
             shape = MaterialTheme.shapes.medium,
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(max = 220.dp),
+                .heightIn(max = 155.dp),
             color = if (isOn) MaterialTheme.colorScheme.surfaceVariant
             else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
         ) {
@@ -710,7 +726,7 @@ fun DiscoveryScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(48.dp))
+        Spacer(modifier = Modifier.height(24.dp))
         Text(
             text = "Network Security",
             fontSize = 14.sp,
@@ -727,7 +743,7 @@ fun DiscoveryScreen(
         ) {
             Column(
                 modifier = Modifier
-                    .padding(16.dp)
+                    .padding(12.dp)
                     .fillMaxWidth()
 
             ) {
@@ -775,7 +791,7 @@ fun DiscoveryScreen(
                     exit = shrinkVertically() + fadeOut()
                 ) {
                     Column {
-                        Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
 
                         // Edit button
                         Row(
@@ -819,7 +835,7 @@ fun DiscoveryScreen(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
 
                         // Username Row
                         LaunchedEffect(isEditing) {
@@ -879,7 +895,7 @@ fun DiscoveryScreen(
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.fillMaxWidth()
-                                .padding(bottom = 16.dp)
+                                .padding(bottom = 8.dp)
                         ) {
                             Text(
                                 text = "Password",
@@ -933,6 +949,87 @@ fun DiscoveryScreen(
                             }
                         }
                     }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+        Text(
+            text = "Manage Networks",
+            fontSize = 14.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(bottom = 8.dp),
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Surface(
+            tonalElevation = 4.dp,
+            shape = MaterialTheme.shapes.medium,
+            modifier = Modifier
+                .fillMaxWidth(),
+            color = MaterialTheme.colorScheme.surfaceVariant
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(16.dp)
+                    .fillMaxWidth()
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = ripple(color = Color.DarkGray),
+                            onClick = onOpenAllowedNetworks
+                        )
+                ) {
+                    Image(
+                        painter = painterResource(id = R.drawable.ic_allowed_wifi),
+                        contentDescription = "Allowed networks icon",
+                        alpha = if ( isSystemInDarkTheme()) 0.85f else 1.0f,
+                        modifier = Modifier.size(28.dp)
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Text(
+                        text = "Allowed Networks",
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = 16.sp
+                    )
+                }
+                HorizontalDivider(
+                    modifier = Modifier
+                        .offset(y = 4.dp)
+                        .padding(start = 45.dp)
+                        .padding(end = 8.dp)
+                        .padding(top = 8.dp),
+                    thickness = 0.5.dp,
+                    color = Color.Gray.copy(alpha = 0.2f)
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = ripple(color = Color.DarkGray),
+                            onClick = onOpenBlockedNetworks
+                        )
+                ) {
+                    Image(
+                        painter = painterResource(id = R.drawable.ic_blocked_wifi),
+                        contentDescription = "Blocked networks icon",
+                        alpha = if ( isSystemInDarkTheme()) 0.85f else 1.0f,
+                        modifier = Modifier.size(28.dp)
+                    )
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Text(
+                        text = "Blocked Networks",
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = 16.sp
+                    )
                 }
             }
         }
@@ -1004,7 +1101,6 @@ fun DiscoveryScreen(
                                         // We use clickable here to force the custom ripple color
                                         .clickable(
                                             interactionSource = remember { MutableInteractionSource() },
-                                            indication = ripple(color = Color.DarkGray), // Your dark gray ripple
                                             onClick = { /* This is handled by the TextButton's onClick */ }
                                         )
                                 ) {
@@ -1033,7 +1129,6 @@ fun DiscoveryScreen(
                                         .weight(1f)
                                         .clickable(
                                             interactionSource = remember { MutableInteractionSource() },
-                                            indication = ripple(color = Color.DarkGray), // Your dark gray ripple
                                             onClick = { /* This is handled by the TextButton's onClick */ }
                                         )
                                 ) {
@@ -1388,6 +1483,157 @@ fun BiometricGateScreen(onUnlockClick: () -> Unit) {
         Button(onClick = onUnlockClick) {
             Text(text = "Verify Authentication",
                 color = if (isSystemInDarkTheme()) Color.Black else Color.White
+            )
+        }
+    }
+}
+
+@Composable
+fun NetworkListScreen(
+    title: String,
+    networks: List<String>,
+    iconRes: Int,
+    onRemove: (String) -> Unit,
+    onBack: () -> Unit
+) {
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+
+    BackHandler { onBack() }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+        ) {
+            Spacer(modifier = Modifier.height(32.dp))
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+            ) {
+                IconButton(
+                    onClick = onBack,
+                    modifier = Modifier.size(32.dp).offset(x = (-8).dp)
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.baseline_chevron_left),
+                        contentDescription = "Back",
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Text(
+                    text = title,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                if (networks.isEmpty()) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "No networks here",
+                            color = Color.Gray,
+                            fontSize = 15.sp
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .draggableScrollbar(listState, scope),
+                        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 32.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(networks, key = { it }) { ssid ->
+                            NetworkRow(
+                                ssid = ssid,
+                                iconRes = iconRes,
+                                onRemove = { onRemove(ssid) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun NetworkRow(
+    ssid: String,
+    iconRes: Int,
+    onRemove: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            painter = painterResource(id = iconRes),
+            tint = Color(0xFF2BAED5),
+            contentDescription = null,
+            modifier = Modifier
+                .size(28.dp)
+                .offset(y = (-4).dp)
+        )
+
+        Spacer(modifier = Modifier.width(16.dp))
+
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 8.dp)
+        ) {
+            Text(
+                text = ssid,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontSize = 16.sp
+            )
+            HorizontalDivider(
+                modifier = Modifier
+                    .offset(y = 4.dp)
+                    .padding(top = 8.dp),
+                thickness = 0.5.dp,
+                color = Color.Gray.copy(alpha = 0.3f)
+            )
+        }
+
+        IconButton(
+            onClick = onRemove,
+            modifier = Modifier
+                .size(28.dp)
+                .offset(y = (-4).dp)
+        ) {
+            Icon(
+                painter = painterResource(id = R.drawable.baseline_close),
+                contentDescription = "Remove",
+                tint = Color.Gray,
+                modifier = Modifier.size(18.dp)
             )
         }
     }

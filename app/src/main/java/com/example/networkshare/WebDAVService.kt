@@ -16,6 +16,7 @@ import androidx.core.content.edit
 import android.annotation.SuppressLint
 import android.app.NotificationManager
 import java.util.Collections
+import android.os.Build
 
 data class FolderItem(
     val file: File,
@@ -72,6 +73,9 @@ class WebDAVService : Service(), TransferListener {
         }
 
         createNotificationChannel()
+        NetworkTrustManager.ensureChannel(      // ← add this
+            getSystemService(NotificationManager::class.java)
+        )
 
         val contentIntent = Intent(this, MainActivity::class.java).apply {
             setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
@@ -207,6 +211,56 @@ class WebDAVService : Service(), TransferListener {
             return
         }
 
+        // ← add this block
+        NetworkTrustManager.load(this)          // ← move to top of startWebDAVServers()
+        NetworkTrustManager.ensureChannel(
+            getSystemService(NotificationManager::class.java)
+        )
+
+        val isOnHotspot = try {
+            NetworkInterface.getNetworkInterfaces().toList().any { intf ->
+                intf.isUp && !intf.isLoopback && (
+                        intf.name.contains("ap") || intf.name.contains("softap")
+                        )
+            }
+        } catch (_: Exception) { false }
+
+        if (!isOnHotspot) {
+            // We're on WiFi — check trust
+            val connectivityManager = applicationContext
+                .getSystemService(CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+            val wifiManager = applicationContext
+                .getSystemService(WIFI_SERVICE) as android.net.wifi.WifiManager
+
+            val ssid = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val network = connectivityManager.activeNetwork
+                val caps = if (network != null)
+                    connectivityManager.getNetworkCapabilities(network) else null
+                val info = caps?.transportInfo as? android.net.wifi.WifiInfo
+                info?.ssid?.removeSurrounding("\"") ?: ""
+            } else {
+                @Suppress("DEPRECATION")
+                wifiManager.connectionInfo.ssid?.removeSurrounding("\"") ?: ""
+            }
+
+            Log.d(tag, "Current WiFi SSID: '$ssid'")
+
+            if (ssid.isNotBlank() && !NetworkTrustManager.isHotspot(ssid)) {
+                when (NetworkTrustManager.getTrust(ssid)) {
+                    NetworkTrustManager.Trust.UNKNOWN -> {
+                        Log.d(tag, "Unknown network — showing notification for: $ssid")
+                        NetworkTrustManager.showTrustNotification(this, ssid)
+                    }
+                    NetworkTrustManager.Trust.BLOCKED -> {
+                        Log.d(tag, "Blocked network: $ssid — server will return 403")
+                    }
+                    else -> {
+                        Log.d(tag, "Trusted network: $ssid")
+                    }
+                }
+            }
+        }
+
         var nextPort = 8080
         val maxPort = 8089
 
@@ -309,11 +363,29 @@ class WebDAVService : Service(), TransferListener {
 
     private fun getLocalIpAddress(): String? {
         return try {
-            NetworkInterface.getNetworkInterfaces().toList()
-                .flatMap { it.inetAddresses.toList() }
-                .filterIsInstance<Inet4Address>()
-                .firstOrNull { !it.isLoopbackAddress }
-                ?.hostAddress
+            val interfaces = NetworkInterface.getNetworkInterfaces().toList()
+                .filter { intf ->
+                    intf.isUp && !intf.isLoopback && (
+                            intf.name.contains("wlan") ||
+                                    intf.name.contains("ap") ||
+                                    intf.name.contains("softap") ||
+                                    intf.name.contains("rndis")
+                            )
+                }
+
+            val priority = listOf("rndis", "softap", "ap", "wlan")
+
+            for (prefix in priority) {
+                val match = interfaces
+                    .firstOrNull { it.name.contains(prefix) }
+                    ?.inetAddresses?.toList()
+                    ?.filterIsInstance<Inet4Address>()
+                    ?.firstOrNull { !it.isLoopbackAddress }
+                    ?.hostAddress
+                if (match != null) return match
+            }
+
+            null
         } catch (_: Exception) { null }
     }
 
@@ -358,6 +430,7 @@ class WebDAVService : Service(), TransferListener {
         activeServers.forEach { it.stopServer() }
         activeServers.clear()
         sendBroadcast(Intent("com.example.networkshare.SERVER_STOPPED"))
+        NetworkTrustManager.allowOnceNetworks.clear()  // ← add this
         super.onDestroy()
     }
 
