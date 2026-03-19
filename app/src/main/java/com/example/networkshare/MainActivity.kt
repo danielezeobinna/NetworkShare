@@ -91,6 +91,9 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     }
 
     private var isUnlocked by mutableStateOf(false)
+    private var lastUnlockedTime = 0L
+    private val cooldownMs = 25_000L
+    private var isValidNetwork by mutableStateOf(true)
     private var serverAddresses by mutableStateOf("Internal Storage:\nhttp://0.0.0.0:8080/")
     private var isDiscoveryOn by mutableStateOf(false)
     private var isPending by mutableStateOf(false)
@@ -105,13 +108,18 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
+                "com.example.networkshare.NO_NETWORK_DETECTED" -> {
+                    showNetworkDialog = true
+                }
                 "com.example.networkshare.SERVER_STOPPED" -> {
                     isDiscoveryOn = false
                 }
                 "com.example.networkshare.ADDRESSES_UPDATED" -> {
                     val data = intent.getStringExtra("address_list")
+                    val validNetwork = intent.getBooleanExtra("is_valid_network", true)
                     if (data != null) {
                         serverAddresses = data
+                        isValidNetwork = validNetwork  // ← add this state
                         saveAddresses(data)
                     }
                 }
@@ -198,74 +206,74 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     }
 
     private fun showBiometricPrompt() {
+        val now = System.currentTimeMillis()
+        if (isUnlocked && now - lastUnlockedTime < cooldownMs) {
+            return  // Still within cooldown, skip prompt
+        }
+
         val km = getSystemService(KEYGUARD_SERVICE) as KeyguardManager
         val biometricManager = BiometricManager.from(this)
 
-        // 1. If the phone has NO security at all, just let them in.
+        // 1. No security at all — just let them in
         if (!km.isDeviceSecure) {
             isUnlocked = true
+            lastUnlockedTime = System.currentTimeMillis()
             initPermissions()
             return
         }
 
-        // 2. Define the legacy PIN fallback function to avoid repeating code
+        // 2. Legacy PIN fallback — works on all versions
         val launchLegacyPin = {
             @Suppress("DEPRECATION")
             val intent = km.createConfirmDeviceCredentialIntent(
-                "NetworkShare Security", // The Title (Keep this so they know WHY they are being asked)
-                null                      // Passing null for the description
+                "NetworkShare Security",
+                null
             )
-
             if (intent != null) {
                 startActivityForResult(intent, REQ_PIN)
             } else {
-                // Fallback if for some reason the intent couldn't be created
                 isUnlocked = true
+                lastUnlockedTime = System.currentTimeMillis()
                 initPermissions()
             }
         }
 
-        // 3. Check if Biometrics (Fingerprint/Face) are available/enrolled
-        val canAuth = biometricManager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)
+        // 3. Check biometric availability
+        val canUseBiometrics = biometricManager.canAuthenticate(
+            BiometricManager.Authenticators.BIOMETRIC_STRONG
+        ) == BiometricManager.BIOMETRIC_SUCCESS
 
-        // If on Android 9 (or below) and no biometrics are set up, go straight to PIN
-        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P && canAuth != BiometricManager.BIOMETRIC_SUCCESS) {
+        // 4. If no biometrics available on ANY Android version — go straight to PIN
+        if (!canUseBiometrics) {
             launchLegacyPin()
             return
         }
 
-        // --- BIOMETRIC PROMPT SETUP ---
+        // 5. Biometrics ARE available — show biometric prompt
         val executor = ContextCompat.getMainExecutor(this)
         val biometricPrompt = BiometricPrompt(this, executor,
             object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                     super.onAuthenticationSucceeded(result)
                     isUnlocked = true
+                    lastUnlockedTime = System.currentTimeMillis()
                     initPermissions()
                 }
 
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
                     super.onAuthenticationError(errorCode, errString)
-
                     when (errorCode) {
-                        // 1. User clicked "Use PIN / Pattern"
-                        BiometricPrompt.ERROR_NEGATIVE_BUTTON -> {
-                            launchLegacyPin()
-                        }
-
-                        // 2. Too many failed attempts! Switch to PIN automatically.
+                        BiometricPrompt.ERROR_NEGATIVE_BUTTON,
                         BiometricPrompt.ERROR_LOCKOUT,
                         BiometricPrompt.ERROR_LOCKOUT_PERMANENT -> {
                             launchLegacyPin()
                         }
-
-                        // 3. User explicitly swiped away or hit back
                         BiometricPrompt.ERROR_USER_CANCELED -> {
+                            // Do nothing — let them try again via the button
                         }
-
-                        // 4. Anything else (Hardware error, sensor dirty, etc.)
                         else -> {
-                            Toast.makeText(this@MainActivity, errString, Toast.LENGTH_SHORT).show()
+                            // Hardware error, sensor issue etc — fall to PIN
+                            launchLegacyPin()
                         }
                     }
                 }
@@ -276,13 +284,11 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
             .setSubtitle("Authenticate to manage your server")
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            // Android 10+: Unified Fingerprint + PIN screen
             builder.setAllowedAuthenticators(
                 BiometricManager.Authenticators.BIOMETRIC_STRONG or
                         BiometricManager.Authenticators.DEVICE_CREDENTIAL
             )
         } else {
-            // Android 9: Custom "Use PIN" button that triggers our legacy fallback
             builder.setNegativeButtonText("Try Another Way")
         }
 
@@ -295,10 +301,19 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         if (requestCode == REQ_PIN) {
             if (resultCode == RESULT_OK) {
                 isUnlocked = true
+                lastUnlockedTime = System.currentTimeMillis()
                 initPermissions()
-            } else {
-                Toast.makeText(this, "Authentication failed", Toast.LENGTH_SHORT).show()
-                finish()
+            } else if (resultCode == RESULT_CANCELED) {
+                // On some devices RESULT_CANCELED is returned even on success
+                // so we check keyguard state instead of trusting resultCode
+                val km = getSystemService(KEYGUARD_SERVICE) as KeyguardManager
+                if (!km.isDeviceLocked) {
+                    isUnlocked = true
+                    lastUnlockedTime = System.currentTimeMillis()
+                    initPermissions()
+                } else {
+                    Toast.makeText(this, "Authentication failed", Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
@@ -317,7 +332,10 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 
     override fun onStop() {
         super.onStop()
-        isUnlocked = false
+        val now = System.currentTimeMillis()
+        if (now - lastUnlockedTime >= cooldownMs) {
+            isUnlocked = false
+        }
         try { unregisterReceiver(receiver) } catch (_: Exception) {}
     }
 
@@ -380,7 +398,6 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
             if (!isNetworkAvailable()) {
                 onShowDialog()
                 showNetworkDialog = true
-                isDiscoveryOn = false
                 isPending = false
                 return
             }
@@ -557,6 +574,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 
 @Composable
 fun DiscoveryScreen(
+    modifier: Modifier = Modifier,
     isOn: Boolean,
     isPending: Boolean,
     addresses: String,
@@ -564,7 +582,6 @@ fun DiscoveryScreen(
     onOpenPicker: () -> Unit,
     onOpenAllowedNetworks: () -> Unit,
     onOpenBlockedNetworks: () -> Unit,
-    modifier: Modifier = Modifier
 ) {
     val isDark = isSystemInDarkTheme()
     val context = LocalContext.current
@@ -575,6 +592,7 @@ fun DiscoveryScreen(
     val focusManager = LocalFocusManager.current
     val focusRequester = remember { FocusRequester() }
     val softwareKeyboardController = LocalSoftwareKeyboardController.current
+    val networkState = WebDAVService.networkState.value
 
 // Keep track of the text at the moment they clicked "Edit"
     var originalUsername by remember { mutableStateOf("") }
@@ -675,11 +693,11 @@ fun DiscoveryScreen(
 
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            text = "Windows Explorer Addresses:",
+            text = "Shared Paths Addresses:",
             fontSize = 14.sp,
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(bottom = 8.dp),
-            color = if (isOn) MaterialTheme.colorScheme.onSurface
+            color = if (isOn && networkState == NetworkState.TRUSTED) MaterialTheme.colorScheme.onSurface
             else Color.Gray
         )
         Surface(
@@ -688,39 +706,104 @@ fun DiscoveryScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(max = 155.dp),
-            color = if (isOn) MaterialTheme.colorScheme.surfaceVariant
+            color = if (isOn && networkState == NetworkState.TRUSTED) MaterialTheme.colorScheme.surfaceVariant
             else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
         ) {
-            SelectionContainer {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier
-                        .draggableScrollbar(listState, scope)
-                        .padding(16.dp)
-                        .graphicsLayer(alpha = if (isOn) 1f else 0.5f)
-                ) {
-                    val addressList = addresses.split("\n").filter { it.isNotBlank() }
+            val addressLines = addresses
+                .split("\n")
+                .filter { it.isNotBlank() }
 
-                    itemsIndexed(addressList) { _, address ->
-                        val isUrl = address.startsWith("http")
+            val noPaths = WebDAVService.selectedPaths.isEmpty()
 
+            val displayLines = if (networkState != NetworkState.TRUSTED) {
+                val grouped = mutableListOf<String>()
+                var count = 0
+                for (line in addressLines) {
+                    if (count >= 2) break
+                    grouped.add(line)
+                    if (line.startsWith("http")) count++
+                }
+                grouped
+            } else {
+                addressLines
+            }
+
+            when {
+                noPaths -> {
+                    Column(
+                        modifier = Modifier
+                            .padding(16.dp)
+                            .graphicsLayer(alpha = 0.5f)
+                    ) {
                         Text(
-                            text = address,
-                            fontWeight = FontWeight.Bold,
+                            text = "No folders selected.\nGo to 'Choose Shared Paths' to start.",
                             fontFamily = FontFamily.Monospace,
                             fontSize = 14.sp,
-                            color = if (isUrl && isOn) {
-                                MaterialTheme.colorScheme.primary
-                            } else if (isOn) {
-                                MaterialTheme.colorScheme.onSurface
-                            } else {
-                                Color.Gray
-                            },
-                            modifier = Modifier.padding(
-                                bottom = if (isUrl) 16.dp else 2.dp,
-                                top = 2.dp
-                            )
+                            color = Color.Gray
                         )
+                    }
+                }
+
+                networkState == NetworkState.NO_NETWORK -> {
+                    Column(
+                        modifier = Modifier
+                            .padding(16.dp)
+                            .graphicsLayer(alpha = 0.5f)
+                    ) {
+                        Text(
+                            text = "No network detected.\nJoin a WiFi or create a Hotspot to start sharing.",
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 14.sp,
+                            color = Color.Gray
+                        )
+                    }
+                }
+
+                isOn && networkState == NetworkState.TRUSTED -> {
+                    SelectionContainer {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier
+                                .draggableScrollbar(listState, scope)
+                                .padding(16.dp)
+                        ) {
+                            itemsIndexed(displayLines) { _, address ->
+                                val isUrl = address.startsWith("http")
+                                Text(
+                                    text = address,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 14.sp,
+                                    color = if (isUrl) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.padding(
+                                        bottom = if (isUrl) 16.dp else 2.dp,
+                                        top = 2.dp
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+
+                else -> {
+                    Column(
+                        modifier = Modifier
+                            .padding(16.dp)
+                            .graphicsLayer(alpha = 0.5f)
+                    ) {
+                        displayLines.forEach { address ->
+                            val isUrl = address.startsWith("http")
+                            Text(
+                                text = address,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 14.sp,
+                                color = Color.Gray,
+                                modifier = Modifier.padding(
+                                    bottom = if (isUrl) 16.dp else 2.dp,
+                                    top = 2.dp
+                                )
+                            )
+                        }
                     }
                 }
             }

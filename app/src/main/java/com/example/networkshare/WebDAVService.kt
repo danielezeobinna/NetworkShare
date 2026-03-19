@@ -25,7 +25,8 @@ data class FolderItem(
 )
 
 class WebDAVService : Service(), TransferListener {
-
+    private var currentSsid: String = ""
+    private var networkCallback: android.net.ConnectivityManager.NetworkCallback? = null
     private val activeServers = mutableListOf<WebDAVServer>()
     private val channelId = "WebDAV_Service_Channel"
     private val tag = "WebDAVService"
@@ -67,12 +68,11 @@ class WebDAVService : Service(), TransferListener {
         }
 
         if (!isNetworkAvailable()) {
-            android.widget.Toast.makeText(this, "WiFi or Hotspot required to start", android.widget.Toast.LENGTH_SHORT).show()
-            stopSelf()
-            return START_NOT_STICKY
+            sendBroadcast(Intent("com.example.networkshare.NO_NETWORK_DETECTED"))
         }
 
         createNotificationChannel()
+        registerNetworkCallback()
         NetworkTrustManager.ensureChannel(      // ← add this
             getSystemService(NotificationManager::class.java)
         )
@@ -205,12 +205,6 @@ class WebDAVService : Service(), TransferListener {
         activeServers.forEach { it.stopServer() }
         activeServers.clear()
 
-        if (!isNetworkAvailable()) {
-            sendBroadcast(Intent("com.example.networkshare.SERVER_STOPPED"))
-            stopSelf()
-            return
-        }
-
         // ← add this block
         NetworkTrustManager.load(this)          // ← move to top of startWebDAVServers()
         NetworkTrustManager.ensureChannel(
@@ -226,39 +220,9 @@ class WebDAVService : Service(), TransferListener {
         } catch (_: Exception) { false }
 
         if (!isOnHotspot) {
-            // We're on WiFi — check trust
-            val connectivityManager = applicationContext
-                .getSystemService(CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
-            val wifiManager = applicationContext
-                .getSystemService(WIFI_SERVICE) as android.net.wifi.WifiManager
-
-            val ssid = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val network = connectivityManager.activeNetwork
-                val caps = if (network != null)
-                    connectivityManager.getNetworkCapabilities(network) else null
-                val info = caps?.transportInfo as? android.net.wifi.WifiInfo
-                info?.ssid?.removeSurrounding("\"") ?: ""
-            } else {
-                @Suppress("DEPRECATION")
-                wifiManager.connectionInfo.ssid?.removeSurrounding("\"") ?: ""
-            }
-
-            Log.d(tag, "Current WiFi SSID: '$ssid'")
-
-            if (ssid.isNotBlank() && !NetworkTrustManager.isHotspot(ssid)) {
-                when (NetworkTrustManager.getTrust(ssid)) {
-                    NetworkTrustManager.Trust.UNKNOWN -> {
-                        Log.d(tag, "Unknown network — showing notification for: $ssid")
-                        NetworkTrustManager.showTrustNotification(this, ssid)
-                    }
-                    NetworkTrustManager.Trust.BLOCKED -> {
-                        Log.d(tag, "Blocked network: $ssid — server will return 403")
-                    }
-                    else -> {
-                        Log.d(tag, "Trusted network: $ssid")
-                    }
-                }
-            }
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                updateNetworkTrust()
+            }, 1500)
         }
 
         var nextPort = 8080
@@ -273,6 +237,8 @@ class WebDAVService : Service(), TransferListener {
             }
         }.distinct().map { File(it) }
 
+        val boundIp = getLocalIpAddress() ?: "0.0.0.0"
+
         roots.forEach { root ->
             val allowedInThisRoot = selectedPaths.filter { it.startsWith(root.absolutePath) }
 
@@ -283,7 +249,7 @@ class WebDAVService : Service(), TransferListener {
 
                 if (nextPort <= maxPort) {
                     try {
-                        activeServers.add(WebDAVServer(nextPort, root, this, allowedInThisRoot, this))
+                        activeServers.add(WebDAVServer(nextPort, root, this, allowedInThisRoot, this, boundIp))
                         nextPort++
                     } catch (e: Exception) {
                         Log.e(tag, "Failed to start server for ${root.absolutePath}: ${e.message}")
@@ -304,12 +270,7 @@ class WebDAVService : Service(), TransferListener {
     }
 
     private fun broadcastCurrentAddresses() {
-        val ip = getLocalIpAddress() ?: "127.0.0.1"
         val statusSummary = StringBuilder()
-
-        if (activeServers.isEmpty()) {
-            statusSummary.append("No folders selected.\nGo to 'Choose Shared Paths' to start.")
-        }
 
         data class AddressItem(
             val label: String,
@@ -338,7 +299,7 @@ class WebDAVService : Service(), TransferListener {
                 addressList.add(AddressItem(
                     label = storageLabel,
                     folderName = folder.name,
-                    url = "http://$ip:${server.port}/$relativePath",
+                    url = "http://${server.boundIp}:${server.port}/$relativePath",
                     isStorage = isRoot,
                     isTempVip = isTempVip
                 ))
@@ -356,9 +317,70 @@ class WebDAVService : Service(), TransferListener {
             statusSummary.append("$displayName:\n${item.url}\n\n")
         }
 
+        val boundIp = activeServers.firstOrNull()?.boundIp ?: "0.0.0.0"
+        val isValidNetwork = boundIp != "0.0.0.0"
+
         val intent = Intent("com.example.networkshare.ADDRESSES_UPDATED")
         intent.putExtra("address_list", statusSummary.toString().trim().ifEmpty { "No folders selected." })
+        intent.putExtra("is_valid_network", isValidNetwork)
         sendBroadcast(intent)
+    }
+
+    private fun registerNetworkCallback() {
+        val connectivityManager = getSystemService(CONNECTIVITY_SERVICE)
+                as android.net.ConnectivityManager
+
+        val request = android.net.NetworkRequest.Builder()
+            .addTransportType(android.net.NetworkCapabilities.TRANSPORT_WIFI)
+            .build()
+
+        networkCallback = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // Android 12+ — use FLAG_INCLUDE_LOCATION_INFO for real SSID
+            object : android.net.ConnectivityManager.NetworkCallback(
+                FLAG_INCLUDE_LOCATION_INFO
+            ) {
+                override fun onCapabilitiesChanged(
+                    network: android.net.Network,
+                    caps: android.net.NetworkCapabilities
+                ) {
+                    val info = caps.transportInfo as? android.net.wifi.WifiInfo
+                    val ssid = info?.ssid?.removeSurrounding("\"") ?: ""
+                    if (ssid.isNotBlank() && ssid != "<unknown ssid>") {
+                        currentSsid = ssid
+                        updateNetworkTrust()
+                        Log.d(tag, "NetworkCallback SSID: $ssid")
+                    }
+                }
+
+                override fun onLost(network: android.net.Network) {
+                    currentSsid = ""
+                    updateNetworkTrust()
+                }
+            }
+        } else {
+            // Android 8-11 — fallback without the flag
+            object : android.net.ConnectivityManager.NetworkCallback() {
+                override fun onCapabilitiesChanged(
+                    network: android.net.Network,
+                    caps: android.net.NetworkCapabilities
+                ) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        val info = caps.transportInfo as? android.net.wifi.WifiInfo
+                        val ssid = info?.ssid?.removeSurrounding("\"") ?: ""
+                        if (ssid.isNotBlank() && ssid != "<unknown ssid>") {
+                            currentSsid = ssid
+                            Log.d(tag, "NetworkCallback SSID: $ssid")
+                        }
+                    }
+                }
+
+                override fun onLost(network: android.net.Network) {
+                    currentSsid = ""
+                }
+            }
+        }
+
+        connectivityManager.registerNetworkCallback(request, networkCallback!!)
     }
 
     private fun getLocalIpAddress(): String? {
@@ -406,17 +428,74 @@ class WebDAVService : Service(), TransferListener {
         }
     }
 
-    private fun verifyAndStop() {
-        // Wait 1.5 seconds for the hardware to settle
-        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            val currentIp = getLocalIpAddress()
-            val hardwareActive = isNetworkAvailable()
+    private fun updateNetworkTrust() {
+        val isOnHotspot = try {
+            val wifiManager = applicationContext
+                .getSystemService(WIFI_SERVICE) as android.net.wifi.WifiManager
+            val method = wifiManager.javaClass.getDeclaredMethod("isWifiApEnabled")
+            method.isAccessible = true
+            method.invoke(wifiManager) as Boolean
+        } catch (_: Exception) { false }
 
-            // If no hardware is on, or the IP is gone/local, stop the service
-            if (!hardwareActive || currentIp == null || currentIp == "127.0.0.1") {
-            Log.d(tag, "Strong check failed. Hardware Active: $hardwareActive, IP: $currentIp")
-            stopSelf()
+        if (isOnHotspot) {
+            isNetworkTrusted.value = true
+            networkState.value = NetworkState.TRUSTED
+            Log.d(tag, "Hotspot active — always trusted")
+            return
         }
+
+        val ssid = if (currentSsid.isNotBlank()) {
+            currentSsid
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val connectivityManager = applicationContext
+                .getSystemService(CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+            val network = connectivityManager.activeNetwork
+            val caps = if (network != null)
+                connectivityManager.getNetworkCapabilities(network) else null
+            val info = caps?.transportInfo as? android.net.wifi.WifiInfo
+            info?.ssid?.removeSurrounding("\"") ?: ""
+        } else {
+            val wifiManager = applicationContext
+                .getSystemService(WIFI_SERVICE) as android.net.wifi.WifiManager
+            @Suppress("DEPRECATION")
+            wifiManager.connectionInfo.ssid?.removeSurrounding("\"") ?: ""
+        }
+
+        Log.d(tag, "WLAN — SSID: '$ssid' | trust: ${NetworkTrustManager.getTrust(ssid)}")
+
+        when {
+            ssid.isBlank() || ssid == "<unknown ssid>" -> {
+                isNetworkTrusted.value = false
+                networkState.value = NetworkState.NO_NETWORK
+            }
+
+            NetworkTrustManager.isHotspot(ssid) -> {
+                isNetworkTrusted.value = true
+                networkState.value = NetworkState.TRUSTED
+            }
+
+            NetworkTrustManager.getTrust(ssid) == NetworkTrustManager.Trust.ALLOWED ||
+                    NetworkTrustManager.getTrust(ssid) == NetworkTrustManager.Trust.ALLOW_ONCE -> {
+                isNetworkTrusted.value = true
+                networkState.value = NetworkState.TRUSTED
+            }
+
+            else -> {
+                isNetworkTrusted.value = false
+                networkState.value = NetworkState.UNTRUSTED
+            }
+        }
+    }
+
+    private fun verifyAndStop() {
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            val hardwareActive = isNetworkAvailable()
+            if (!hardwareActive) {
+                sendBroadcast(Intent("com.example.networkshare.NO_NETWORK_DETECTED"))
+                networkState.value = NetworkState.NO_NETWORK
+                isNetworkTrusted.value = false
+                broadcastCurrentAddresses()
+            }
         }, 1500)
     }
 
@@ -430,6 +509,13 @@ class WebDAVService : Service(), TransferListener {
         activeServers.forEach { it.stopServer() }
         activeServers.clear()
         sendBroadcast(Intent("com.example.networkshare.SERVER_STOPPED"))
+        networkCallback?.let {
+            try {
+                val cm = getSystemService(CONNECTIVITY_SERVICE)
+                        as android.net.ConnectivityManager
+                cm.unregisterNetworkCallback(it)
+            } catch (_: Exception) {}
+        }
         NetworkTrustManager.allowOnceNetworks.clear()  // ← add this
         super.onDestroy()
     }
@@ -459,7 +545,9 @@ class WebDAVService : Service(), TransferListener {
     }
 
     companion object {
+        var networkState = mutableStateOf(NetworkState.NO_NETWORK)
         var isAuthEnabled = mutableStateOf(true)
+        var isNetworkTrusted = mutableStateOf(false)
         var username = mutableStateOf("user")
         var password = mutableStateOf("pass")
         private val cancelledFiles = Collections.synchronizedSet(mutableSetOf<String>())
@@ -548,3 +636,5 @@ class TransferCancelReceiver : android.content.BroadcastReceiver() {
         WebDAVService.cancelTransfer(fileName)
     }
 }
+
+enum class NetworkState { NO_NETWORK, UNTRUSTED, TRUSTED }
