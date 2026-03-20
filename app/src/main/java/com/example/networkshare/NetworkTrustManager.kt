@@ -111,6 +111,7 @@ object NetworkTrustManager {
             .setContentText("\"$ssid\" is not a trusted network. Allow sharing on it?")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setOngoing(true)
             .setColor("#2BAED5".toColorInt())
             .setAutoCancel(true)
             .addAction(0, "Allow",      pendingFor(ACTION_ALLOW))

@@ -44,6 +44,7 @@
             android:launchMode="singleInstance"
             android:taskAffinity=""
             android:exported="true"
+            android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.NetworkShare">
 
             <intent-filter>

@@ -37,15 +37,27 @@ class WebDAVService : Service(), TransferListener {
 
             // This handles Hotspot toggle
             if (action == "android.net.wifi.WIFI_AP_STATE_CHANGED") {
-                val state = intent.getIntExtra("wifi_state", 11)
-                if (state == 11 || state == 14) {
-                    verifyAndStop()
+                val state = intent.getIntExtra("wifi_state", -1)
+                when (state) {
+                    13 -> { // WIFI_AP_STATE_ENABLED — hotspot just turned ON
+                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                            startWebDAVServers()
+                        }, 1500) // small delay so the softap interface is fully up
+                    }
+                    11, 14 -> { // WIFI_AP_STATE_DISABLING / DISABLED — hotspot turning OFF
+                        verifyAndStop()
+                    }
                 }
             }
 
             // This handles WiFi toggle
             if (action == android.net.wifi.WifiManager.WIFI_STATE_CHANGED_ACTION) {
                 val state = intent.getIntExtra(android.net.wifi.WifiManager.EXTRA_WIFI_STATE, 1)
+                if (state == android.net.wifi.WifiManager.WIFI_STATE_ENABLED) {  // ← add this
+                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                        startWebDAVServers()
+                    }, 1500)
+                }
                 if (state == android.net.wifi.WifiManager.WIFI_STATE_DISABLED) {
                     verifyAndStop()
                 }
@@ -326,6 +338,14 @@ class WebDAVService : Service(), TransferListener {
         sendBroadcast(intent)
     }
 
+    private fun refreshServersIfNeeded() {
+        val newIp = getLocalIpAddress() ?: "0.0.0.0"
+        val currentIp = activeServers.firstOrNull()?.boundIp
+        if (newIp != currentIp && newIp != "0.0.0.0") {
+            startWebDAVServers()
+        }
+    }
+
     private fun registerNetworkCallback() {
         val connectivityManager = getSystemService(CONNECTIVITY_SERVICE)
                 as android.net.ConnectivityManager
@@ -349,7 +369,24 @@ class WebDAVService : Service(), TransferListener {
                         currentSsid = ssid
                         updateNetworkTrust()
                         Log.d(tag, "NetworkCallback SSID: $ssid")
+
+                        // ← add this block
+                        if (!NetworkTrustManager.isHotspot(ssid)) {
+                            when (NetworkTrustManager.getTrust(ssid)) {
+                                NetworkTrustManager.Trust.UNKNOWN -> {
+                                    Log.d(tag, "Unknown network — showing notification for: $ssid")
+                                    NetworkTrustManager.showTrustNotification(this@WebDAVService, ssid)
+                                }
+                                NetworkTrustManager.Trust.BLOCKED -> {
+                                    Log.d(tag, "Blocked network: $ssid — server will return 403")
+                                }
+                                else -> {
+                                    Log.d(tag, "Trusted network: $ssid")
+                                }
+                            }
+                        }
                     }
+                    refreshServersIfNeeded()
                 }
 
                 override fun onLost(network: android.net.Network) {
@@ -370,6 +407,22 @@ class WebDAVService : Service(), TransferListener {
                         if (ssid.isNotBlank() && ssid != "<unknown ssid>") {
                             currentSsid = ssid
                             Log.d(tag, "NetworkCallback SSID: $ssid")
+
+                            // ← add this block
+                            if (!NetworkTrustManager.isHotspot(ssid)) {
+                                when (NetworkTrustManager.getTrust(ssid)) {
+                                    NetworkTrustManager.Trust.UNKNOWN -> {
+                                        Log.d(tag, "Unknown network — showing notification for: $ssid")
+                                        NetworkTrustManager.showTrustNotification(this@WebDAVService, ssid)
+                                    }
+                                    NetworkTrustManager.Trust.BLOCKED -> {
+                                        Log.d(tag, "Blocked network: $ssid — server will return 403")
+                                    }
+                                    else -> {
+                                        Log.d(tag, "Trusted network: $ssid")
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -489,12 +542,14 @@ class WebDAVService : Service(), TransferListener {
 
     private fun verifyAndStop() {
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            val hardwareActive = isNetworkAvailable()
-            if (!hardwareActive) {
+            if (!isNetworkAvailable()) {
                 sendBroadcast(Intent("com.example.networkshare.NO_NETWORK_DETECTED"))
                 networkState.value = NetworkState.NO_NETWORK
                 isNetworkTrusted.value = false
                 broadcastCurrentAddresses()
+                updateNetworkTrust()
+            } else {
+                refreshServersIfNeeded()
             }
         }, 1500)
     }

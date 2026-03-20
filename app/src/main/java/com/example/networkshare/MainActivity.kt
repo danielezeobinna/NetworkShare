@@ -1,7 +1,6 @@
 package com.example.networkshare
 
 import android.Manifest
-import android.app.ActivityManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -84,6 +83,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.verticalScroll
 
 class MainActivity : androidx.fragment.app.FragmentActivity() {
     companion object {
@@ -323,6 +323,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         val filter = IntentFilter().apply {
             addAction("com.example.networkshare.SERVER_STOPPED")
             addAction("com.example.networkshare.ADDRESSES_UPDATED")
+            addAction("com.example.networkshare.NO_NETWORK_DETECTED")
         }
         val listenFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             RECEIVER_NOT_EXPORTED
@@ -346,13 +347,16 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 
         if (!isUnlocked) {
             showBiometricPrompt()
+            return
         }
 
         if (running) {
-            val intent = Intent(this, WebDAVService::class.java).apply {
-                action = "REFRESH_INFO"
-            }
-            startService(intent)
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                val intent = Intent(this, WebDAVService::class.java).apply {
+                    action = "REFRESH_INFO"
+                }
+                startService(intent)
+            }, 1500)
         }
     }
 
@@ -386,15 +390,17 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     }
 
     private fun isServiceRunning(): Boolean {
-        val manager = getSystemService(ACTIVITY_SERVICE) as ActivityManager
-        @Suppress("DEPRECATION")
-        return manager.getRunningServices(Integer.MAX_VALUE).any {
-            it.service.className == WebDAVService::class.java.name
+        return try {
+            val manager = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
+            manager.activeNotifications.any { it.id == 1 }
+        } catch (_: Exception) {
+            false
         }
     }
 
     private fun toggleService(start: Boolean, onShowDialog: () -> Unit) {
         if (start) {
+            checkAndRequestLocation()
             if (!isNetworkAvailable()) {
                 onShowDialog()
                 showNetworkDialog = true
@@ -456,6 +462,43 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                 Manifest.permission.WRITE_EXTERNAL_STORAGE
             )
             androidx.core.app.ActivityCompat.requestPermissions(this, permissions, 101)
+        }
+    }
+
+    fun checkAndRequestLocation() {
+        val fineGranted = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.ACCESS_FINE_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+        val coarseGranted = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+        if (fineGranted || coarseGranted) return
+
+        androidx.core.app.ActivityCompat.requestPermissions(
+            this,
+            arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ),
+            101
+        )
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 101) {
+            val granted = grantResults.isNotEmpty() &&
+                    grantResults.any { it == android.content.pm.PackageManager.PERMISSION_GRANTED }
+            if (!granted) {
+                stopService(Intent(this, WebDAVService::class.java))
+                isDiscoveryOn = false
+            }
         }
     }
 
@@ -611,170 +654,214 @@ fun DiscoveryScreen(
         context.startService(intent)
     }
 
-    Column(
-        modifier = modifier
+    val bgColor = MaterialTheme.colorScheme.background
+
+    Box(
+        modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding()
-            .padding(24.dp)
-            .pointerInput(Unit) {
-                detectTapGestures(onTap = {
-                    if (isEditing) {
-                        WebDAVService.username.value = originalUsername
-                        WebDAVService.password.value = originalPassword
-                        isEditing = false
-                    }
-                    focusManager.clearFocus()
-                })
+            .imePadding()
+            .drawWithContent {
+                drawContent()
+                drawRect(
+                    brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                        colors = listOf(
+                            bgColor,
+                            bgColor.copy(alpha = 0f)
+                        ),
+                        startY = 0f,
+                        endY = 40.dp.toPx()
+                    )
+                )
             }
     ) {
-        Spacer(modifier = Modifier.height(24.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(24.dp)
+                .pointerInput(Unit) {
+                    detectTapGestures(onTap = {
+                        if (isEditing) {
+                            WebDAVService.username.value = originalUsername
+                            WebDAVService.password.value = originalPassword
+                            isEditing = false
+                        }
+                        focusManager.clearFocus()
+                    })
+                }
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Network Share",
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontSize = 20.sp
-                )
-                Text(
-                    text = "Your phone can be accessed by other devices on the network",
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    lineHeight = 18.sp
-                )
-            }
-
-            Switch(
-                checked = isOn,
-                onCheckedChange = { onToggle(it) { showNetworkDialog = true } },
-                enabled = !isPending,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = if (isDark) Color.Black else Color.White,
-                    uncheckedThumbColor = if (isDark) Color.White else Color(0xFF666660),
-
-                    uncheckedTrackColor = if (isDark) Color(0xFF666660) else Color(0xFFEEF1F3),
-
-                    uncheckedBorderColor = Color(0xFF666660)
-                )
-            )
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End
-        ) {
-            TextButton(
-                onClick = onOpenPicker,
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+            Spacer(modifier = Modifier.height(24.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Image(
-                        painter = painterResource(id = R.drawable.ic_sp),
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp),
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Choose Shared Paths...",
-                        fontSize = 16.sp,
-                        style = MaterialTheme.typography.labelLarge,
-                        color = Color(0xFF2BAED5)
+                        text = "Network Share",
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = 20.sp
+                    )
+                    Text(
+                        text = "Your phone can be accessed by other devices on the network",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        lineHeight = 18.sp
                     )
                 }
-            }
-        }
 
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = "Shared Paths Addresses:",
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(bottom = 8.dp),
-            color = if (isOn && networkState == NetworkState.TRUSTED) MaterialTheme.colorScheme.onSurface
-            else Color.Gray
-        )
-        Surface(
-            tonalElevation = 4.dp,
-            shape = MaterialTheme.shapes.medium,
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 155.dp),
-            color = if (isOn && networkState == NetworkState.TRUSTED) MaterialTheme.colorScheme.surfaceVariant
-            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-        ) {
-            val addressLines = addresses
-                .split("\n")
-                .filter { it.isNotBlank() }
+                Switch(
+                    checked = isOn,
+                    onCheckedChange = { onToggle(it) { showNetworkDialog = true } },
+                    enabled = !isPending,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = if (isDark) Color.Black else Color.White,
+                        uncheckedThumbColor = if (isDark) Color.White else Color(0xFF666660),
 
-            val noPaths = WebDAVService.selectedPaths.isEmpty()
+                        uncheckedTrackColor = if (isDark) Color(0xFF666660) else Color(0xFFEEF1F3),
 
-            val displayLines = if (networkState != NetworkState.TRUSTED) {
-                val grouped = mutableListOf<String>()
-                var count = 0
-                for (line in addressLines) {
-                    if (count >= 2) break
-                    grouped.add(line)
-                    if (line.startsWith("http")) count++
-                }
-                grouped
-            } else {
-                addressLines
+                        uncheckedBorderColor = Color(0xFF666660)
+                    )
+                )
             }
 
-            when {
-                noPaths -> {
-                    Column(
-                        modifier = Modifier
-                            .padding(16.dp)
-                            .graphicsLayer(alpha = 0.5f)
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                TextButton(
+                    onClick = onOpenPicker,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Image(
+                            painter = painterResource(id = R.drawable.ic_sp),
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "No folders selected.\nGo to 'Choose Shared Paths' to start.",
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 14.sp,
-                            color = Color.Gray
+                            text = "Choose Shared Paths...",
+                            fontSize = 16.sp,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = Color(0xFF2BAED5)
                         )
                     }
                 }
+            }
 
-                networkState == NetworkState.NO_NETWORK -> {
-                    Column(
-                        modifier = Modifier
-                            .padding(16.dp)
-                            .graphicsLayer(alpha = 0.5f)
-                    ) {
-                        Text(
-                            text = "No network detected.\nJoin a WiFi or create a Hotspot to start sharing.",
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 14.sp,
-                            color = Color.Gray
-                        )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Shared Paths Addresses:",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(bottom = 8.dp),
+                color = if (isOn && networkState == NetworkState.TRUSTED) MaterialTheme.colorScheme.onSurface
+                else Color.Gray
+            )
+            Surface(
+                tonalElevation = 4.dp,
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 156.dp),
+                color = if (isOn && networkState == NetworkState.TRUSTED) MaterialTheme.colorScheme.surfaceVariant
+                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            ) {
+                val addressLines = addresses
+                    .split("\n")
+                    .filter { it.isNotBlank() }
+
+                val noPaths = WebDAVService.selectedPaths.isEmpty()
+
+                val displayLines = if (networkState != NetworkState.TRUSTED) {
+                    val grouped = mutableListOf<String>()
+                    var count = 0
+                    for (line in addressLines) {
+                        if (count >= 2) break
+                        grouped.add(line)
+                        if (line.startsWith("http")) count++
                     }
+                    grouped
+                } else {
+                    addressLines
                 }
 
-                isOn && networkState == NetworkState.TRUSTED -> {
-                    SelectionContainer {
-                        LazyColumn(
-                            state = listState,
+                when {
+                    noPaths -> {
+                        Column(
                             modifier = Modifier
-                                .draggableScrollbar(listState, scope)
                                 .padding(16.dp)
+                                .graphicsLayer(alpha = 0.5f)
                         ) {
-                            itemsIndexed(displayLines) { _, address ->
+                            Text(
+                                text = "No folders selected.\nGo to 'Choose Shared Paths' to start.",
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 14.sp,
+                                color = Color.Gray
+                            )
+                        }
+                    }
+
+                    networkState == NetworkState.NO_NETWORK -> {
+                        Column(
+                            modifier = Modifier
+                                .padding(16.dp)
+                                .graphicsLayer(alpha = 0.5f)
+                        ) {
+                            Text(
+                                text = "No network detected.\nJoin a WiFi or create a Hotspot to start sharing.",
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 14.sp,
+                                color = Color.Gray
+                            )
+                        }
+                    }
+
+                    isOn && networkState == NetworkState.TRUSTED -> {
+                        SelectionContainer {
+                            LazyColumn(
+                                state = listState,
+                                modifier = Modifier
+                                    .draggableScrollbar(listState, scope)
+                                    .padding(16.dp)
+                            ) {
+                                itemsIndexed(displayLines) { _, address ->
+                                    val isUrl = address.startsWith("http")
+                                    Text(
+                                        text = address,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 14.sp,
+                                        color = if (isUrl) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.padding(
+                                            bottom = if (isUrl) 16.dp else 2.dp,
+                                            top = 2.dp
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    else -> {
+                        Column(
+                            modifier = Modifier
+                                .padding(16.dp)
+                                .graphicsLayer(alpha = 0.5f)
+                        ) {
+                            displayLines.forEach { address ->
                                 val isUrl = address.startsWith("http")
                                 Text(
                                     text = address,
                                     fontFamily = FontFamily.Monospace,
                                     fontSize = 14.sp,
-                                    color = if (isUrl) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.onSurface,
+                                    color = Color.Gray,
                                     modifier = Modifier.padding(
                                         bottom = if (isUrl) 16.dp else 2.dp,
                                         top = 2.dp
@@ -784,438 +871,416 @@ fun DiscoveryScreen(
                         }
                     }
                 }
-
-                else -> {
-                    Column(
-                        modifier = Modifier
-                            .padding(16.dp)
-                            .graphicsLayer(alpha = 0.5f)
-                    ) {
-                        displayLines.forEach { address ->
-                            val isUrl = address.startsWith("http")
-                            Text(
-                                text = address,
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 14.sp,
-                                color = Color.Gray,
-                                modifier = Modifier.padding(
-                                    bottom = if (isUrl) 16.dp else 2.dp,
-                                    top = 2.dp
-                                )
-                            )
-                        }
-                    }
-                }
             }
-        }
 
-        Spacer(modifier = Modifier.height(24.dp))
-        Text(
-            text = "Network Security",
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(bottom = 8.dp),
-            color = MaterialTheme.colorScheme.onSurface
-        )
-        Surface(
-            tonalElevation = 4.dp,
-            shape = MaterialTheme.shapes.medium,
-            modifier = Modifier
-                .fillMaxWidth(),
-            color = MaterialTheme.colorScheme.surfaceVariant
-        ) {
-            Column(
+            Spacer(modifier = Modifier.height(24.dp))
+            Text(
+                text = "Network Security",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(bottom = 8.dp),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Surface(
+                tonalElevation = 4.dp,
+                shape = MaterialTheme.shapes.medium,
                 modifier = Modifier
-                    .padding(12.dp)
-                    .fillMaxWidth()
-
+                    .fillMaxWidth(),
+                color = MaterialTheme.colorScheme.surfaceVariant
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
+                Column(
+                    modifier = Modifier
+                        .padding(12.dp)
+                        .fillMaxWidth()
+
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Digest Authentication",
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontSize = 16.sp
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Digest Authentication",
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontSize = 16.sp
+                            )
+                        }
+
+                        Switch(
+                            checked = WebDAVService.isAuthEnabled.value,
+                            onCheckedChange = {
+                                WebDAVService.isAuthEnabled.value = it
+                                if (!it) {
+                                    // Turning auth OFF → stop the service
+                                    onToggle(false) { WebDAVService.isAuthEnabled.value = true }
+                                } else {
+                                    // Turning auth ON → just update the flag, don't touch the service
+                                    WebDAVService.savePaths(context)
+                                }
+                            },
+                            enabled = true,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = if (isDark) Color.Black else Color.White,
+                                uncheckedThumbColor = if (isDark) Color.White else Color(0xFF666660),
+
+                                uncheckedTrackColor = if (isDark) Color(0xFF666660) else Color(
+                                    0xFFEEF1F3
+                                ),
+
+                                uncheckedBorderColor = Color(0xFF666660)
+                            )
                         )
                     }
 
-                    Switch(
-                        checked = WebDAVService.isAuthEnabled.value,
-                        onCheckedChange = {
-                            WebDAVService.isAuthEnabled.value = it
-                            if (!it) {
-                                // Turning auth OFF → stop the service
-                                onToggle(false) { WebDAVService.isAuthEnabled.value = true }
-                            } else {
-                                // Turning auth ON → just update the flag, don't touch the service
-                                WebDAVService.savePaths(context)
-                            }
-                        },
-                        enabled = true,
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = if (isDark) Color.Black else Color.White,
-                            uncheckedThumbColor = if (isDark) Color.White else Color(0xFF666660),
+                    AnimatedVisibility(
+                        visible = WebDAVService.isAuthEnabled.value,
+                        enter = expandVertically() + fadeIn(),
+                        exit = shrinkVertically() + fadeOut()
+                    ) {
+                        Column {
+                            Spacer(modifier = Modifier.height(4.dp))
 
-                            uncheckedTrackColor = if (isDark) Color(0xFF666660) else Color(
-                                0xFFEEF1F3
-                            ),
-
-                            uncheckedBorderColor = Color(0xFF666660)
-                        )
-                    )
-                }
-
-                AnimatedVisibility(
-                    visible = WebDAVService.isAuthEnabled.value,
-                    enter = expandVertically() + fadeIn(),
-                    exit = shrinkVertically() + fadeOut()
-                ) {
-                    Column {
-                        Spacer(modifier = Modifier.height(4.dp))
-
-                        // Edit button
-                        Row(
-                            horizontalArrangement = Arrangement.End,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            TextButton(
-                                onClick = {
-                                    if (!isEditing) {
-                                        // Start Editing: Capture the current values
-                                        originalUsername = WebDAVService.username.value
-                                        originalPassword = WebDAVService.password.value
-                                        isEditing = true
-                                    } else {
-                                        // Save & Close: Keep the new values and close
-                                        isEditing = false
-                                        focusManager.clearFocus()
-                                        WebDAVService.savePaths(context)
-                                    }
-                                },
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                            // Edit button
+                            Row(
+                                horizontalArrangement = Arrangement.End,
+                                modifier = Modifier.fillMaxWidth()
                             ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    val label =
-                                        if (isEditing && hasChanged) "Done" else if (isEditing) "Close" else "Edit"
-                                    Text(
-                                        text = label,
-                                        style = MaterialTheme.typography.labelLarge,
-                                        color = Color(0xFF2BAED5)
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Icon(
-                                        painter = painterResource(
-                                            id = if (isEditing && hasChanged) R.drawable.baseline_check else if (isEditing) R.drawable.baseline_close else R.drawable.baseline_edit
-                                        ),
-                                        contentDescription = if (isEditing) "Save" else "Edit",
-                                        modifier = Modifier.size(if (isEditing) 16.dp else 24.dp),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(4.dp))
-
-                        // Username Row
-                        LaunchedEffect(isEditing) {
-                            if (isEditing) {
-                                focusRequester.requestFocus()
-                                softwareKeyboardController?.show()
-                            }
-                        }
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                text = "Username",
-                                color = Color(0xFF2BAED5),
-                                fontSize = 16.sp,
-                                modifier = Modifier.width(90.dp)
-                            )
-                            BasicTextField(
-                                value = WebDAVService.username.value,
-                                onValueChange = { WebDAVService.username.value = it },
-                                enabled = isEditing,
-                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                                keyboardActions = KeyboardActions(
-                                    onDone = {
-                                        // Software Keyboard 'Check' counts as Saving
-                                        isEditing = false
-                                        focusManager.clearFocus()
-                                        WebDAVService.savePaths(context)
-                                    }
-                                ),
-                                textStyle = LocalTextStyle.current.copy(
-                                    fontSize = 16.sp,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                ),
-                                cursorBrush = SolidColor(Color(0xFF2BAED5)),
-                                singleLine = true,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .focusRequester(focusRequester)
-                            )
-                        }
-                        HorizontalDivider(
-                            modifier = Modifier
-                                .offset(y = 4.dp)
-                                .padding(start = 90.dp)
-                                .padding(end = 16.dp)
-                                .padding(top = 8.dp),
-                            thickness = 0.5.dp,
-                            color = Color.Gray.copy(alpha = 0.3f)
-                        )
-
-                        Spacer(modifier = Modifier.height(16.dp))
-
-                        // Password Row
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth()
-                                .padding(bottom = 8.dp)
-                        ) {
-                            Text(
-                                text = "Password",
-                                color = Color(0xFF2BAED5),
-                                fontSize = 16.sp,
-                                modifier = Modifier.width(90.dp)
-                            )
-                            BasicTextField(
-                                value = WebDAVService.password.value,
-                                onValueChange = { WebDAVService.password.value = it },
-                                enabled = isEditing,
-                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                                keyboardActions = KeyboardActions(
-                                    onDone = {
-                                        // Software Keyboard 'Check' counts as Saving
-                                        isEditing = false
-                                        focusManager.clearFocus()
-                                        WebDAVService.savePaths(context)
-                                    }
-                                ),
-                                textStyle = LocalTextStyle.current.copy(
-                                    fontSize = 16.sp,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                ),
-                                cursorBrush = SolidColor(Color(0xFF2BAED5)),
-                                singleLine = true,
-                                visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                                modifier = Modifier.weight(1f)
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .padding(start = 8.dp)
-                                    .pointerInput(Unit) {
-                                        detectTapGestures(
-                                            onPress = {
-                                                passwordVisible = true
-                                                tryAwaitRelease() // Wait for finger to lift
-                                                passwordVisible = false
-                                            }
+                                TextButton(
+                                    onClick = {
+                                        if (!isEditing) {
+                                            // Start Editing: Capture the current values
+                                            originalUsername = WebDAVService.username.value
+                                            originalPassword = WebDAVService.password.value
+                                            isEditing = true
+                                        } else {
+                                            // Save & Close: Keep the new values and close
+                                            isEditing = false
+                                            focusManager.clearFocus()
+                                            WebDAVService.savePaths(context)
+                                        }
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        val label =
+                                            if (isEditing && hasChanged) "Done" else if (isEditing) "Close" else "Edit"
+                                        Text(
+                                            text = label,
+                                            style = MaterialTheme.typography.labelLarge,
+                                            color = Color(0xFF2BAED5)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Icon(
+                                            painter = painterResource(
+                                                id = if (isEditing && hasChanged) R.drawable.baseline_check else if (isEditing) R.drawable.baseline_close else R.drawable.baseline_edit
+                                            ),
+                                            contentDescription = if (isEditing) "Save" else "Edit",
+                                            modifier = Modifier.size(if (isEditing) 16.dp else 24.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            // Username Row
+                            LaunchedEffect(isEditing) {
+                                if (isEditing) {
+                                    focusRequester.requestFocus()
+                                    softwareKeyboardController?.show()
+                                }
+                            }
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
                             ) {
-                                Icon(
-                                    painter = painterResource(
-                                        id = if (passwordVisible) R.drawable.baseline_visibility else R.drawable.baseline_visibility_off
+                                Text(
+                                    text = "Username",
+                                    color = Color(0xFF2BAED5),
+                                    fontSize = 16.sp,
+                                    modifier = Modifier.width(90.dp)
+                                )
+                                BasicTextField(
+                                    value = WebDAVService.username.value,
+                                    onValueChange = { WebDAVService.username.value = it },
+                                    enabled = isEditing,
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                    keyboardActions = KeyboardActions(
+                                        onDone = {
+                                            // Software Keyboard 'Check' counts as Saving
+                                            isEditing = false
+                                            focusManager.clearFocus()
+                                            WebDAVService.savePaths(context)
+                                        }
                                     ),
-                                    contentDescription = "Reveal password",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(16.dp)
+                                    textStyle = LocalTextStyle.current.copy(
+                                        fontSize = 16.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    ),
+                                    cursorBrush = SolidColor(Color(0xFF2BAED5)),
+                                    singleLine = true,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .focusRequester(focusRequester)
                                 )
                             }
-                        }
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(24.dp))
-        Text(
-            text = "Manage Networks",
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(bottom = 8.dp),
-            color = MaterialTheme.colorScheme.onSurface
-        )
-        Surface(
-            tonalElevation = 4.dp,
-            shape = MaterialTheme.shapes.medium,
-            modifier = Modifier
-                .fillMaxWidth(),
-            color = MaterialTheme.colorScheme.surfaceVariant
-        ) {
-            Column(
-                modifier = Modifier
-                    .padding(16.dp)
-                    .fillMaxWidth()
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = ripple(color = Color.DarkGray),
-                            onClick = onOpenAllowedNetworks
-                        )
-                ) {
-                    Image(
-                        painter = painterResource(id = R.drawable.ic_allowed_wifi),
-                        contentDescription = "Allowed networks icon",
-                        alpha = if ( isSystemInDarkTheme()) 0.85f else 1.0f,
-                        modifier = Modifier.size(28.dp)
-                    )
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Text(
-                        text = "Allowed Networks",
-                        color = MaterialTheme.colorScheme.onSurface,
-                        fontSize = 16.sp
-                    )
-                }
-                HorizontalDivider(
-                    modifier = Modifier
-                        .offset(y = 4.dp)
-                        .padding(start = 45.dp)
-                        .padding(end = 8.dp)
-                        .padding(top = 8.dp),
-                    thickness = 0.5.dp,
-                    color = Color.Gray.copy(alpha = 0.2f)
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = ripple(color = Color.DarkGray),
-                            onClick = onOpenBlockedNetworks
-                        )
-                ) {
-                    Image(
-                        painter = painterResource(id = R.drawable.ic_blocked_wifi),
-                        contentDescription = "Blocked networks icon",
-                        alpha = if ( isSystemInDarkTheme()) 0.85f else 1.0f,
-                        modifier = Modifier.size(28.dp)
-                    )
-                    Spacer(modifier = Modifier.width(16.dp))
-                    Text(
-                        text = "Blocked Networks",
-                        color = MaterialTheme.colorScheme.onSurface,
-                        fontSize = 16.sp
-                    )
-                }
-            }
-        }
-
-        if (showNetworkDialog) {
-            Dialog(
-                onDismissRequest = { showNetworkDialog = false },
-                properties = DialogProperties(
-                    usePlatformDefaultWidth = false,
-                    dismissOnBackPress = true,
-                    dismissOnClickOutside = true
-                )
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize(0.98f)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null
-                        ) { showNetworkDialog = false },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Surface(
-                        modifier = Modifier
-                            .offset(y = (-24).dp)
-                            .fillMaxWidth(0.95f)
-                            .padding(horizontal = 4.dp),
-                        shape = RoundedCornerShape(28.dp),
-                        color = if (isSystemInDarkTheme()) Color(0xFF252525) else Color(0xFFFCFCFC),
-                        tonalElevation = 6.dp
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(24.dp),
-                            horizontalAlignment = Alignment.Start
-                        ) {
-                            Text(
-                                text = "No Network Detected",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 20.sp,
-                                color = MaterialTheme.colorScheme.onSurface
+                            HorizontalDivider(
+                                modifier = Modifier
+                                    .offset(y = 4.dp)
+                                    .padding(start = 90.dp)
+                                    .padding(end = 16.dp)
+                                    .padding(top = 8.dp),
+                                thickness = 0.5.dp,
+                                color = Color.Gray.copy(alpha = 0.3f)
                             )
 
                             Spacer(modifier = Modifier.height(16.dp))
 
-                            Text(
-                                text = "Network sharing is only possible when your device is part of a network. Join a Wi-Fi network or create a network using hotspot.",
-                                fontSize = 16.sp,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-
-                            Spacer(modifier = Modifier.height(24.dp))
-
+                            // Password Row
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
+                                    .padding(bottom = 8.dp)
                             ) {
-                                // LEFT BUTTON (Hotspot)
-                                TextButton(
-                                    onClick = {
-                                        showNetworkDialog = false
-                                        val intent = Intent("android.settings.TETHER_SETTINGS")
-                                        try { context.startActivity(intent) } catch (_: Exception) {
-                                            context.startActivity(Intent(Settings.ACTION_WIRELESS_SETTINGS))
+                                Text(
+                                    text = "Password",
+                                    color = Color(0xFF2BAED5),
+                                    fontSize = 16.sp,
+                                    modifier = Modifier.width(90.dp)
+                                )
+                                BasicTextField(
+                                    value = WebDAVService.password.value,
+                                    onValueChange = { WebDAVService.password.value = it },
+                                    enabled = isEditing,
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                    keyboardActions = KeyboardActions(
+                                        onDone = {
+                                            // Software Keyboard 'Check' counts as Saving
+                                            isEditing = false
+                                            focusManager.clearFocus()
+                                            WebDAVService.savePaths(context)
                                         }
-                                    },
+                                    ),
+                                    textStyle = LocalTextStyle.current.copy(
+                                        fontSize = 16.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    ),
+                                    cursorBrush = SolidColor(Color(0xFF2BAED5)),
+                                    singleLine = true,
+                                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Box(
                                     modifier = Modifier
-                                        .weight(1f)
-                                        // We use clickable here to force the custom ripple color
-                                        .clickable(
-                                            interactionSource = remember { MutableInteractionSource() },
-                                            onClick = { /* This is handled by the TextButton's onClick */ }
-                                        )
+                                        .padding(start = 8.dp)
+                                        .pointerInput(Unit) {
+                                            detectTapGestures(
+                                                onPress = {
+                                                    passwordVisible = true
+                                                    tryAwaitRelease() // Wait for finger to lift
+                                                    passwordVisible = false
+                                                }
+                                            )
+                                        }
                                 ) {
-                                    Text("Hotspot", color = Color(0xFF2BAED5), fontSize = 16.sp)
+                                    Icon(
+                                        painter = painterResource(
+                                            id = if (passwordVisible) R.drawable.baseline_visibility else R.drawable.baseline_visibility_off
+                                        ),
+                                        contentDescription = "Reveal password",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(16.dp)
+                                    )
                                 }
+                            }
+                        }
+                    }
+                }
+            }
 
-                                // THE DIVIDER LINE (The subtle line you wanted)
-                                VerticalDivider(
-                                    modifier = Modifier
-                                        .height(20.dp)
-                                        .width(1.dp),
-                                    color = Color.Gray.copy(alpha = 0.2f)
+            Spacer(modifier = Modifier.height(24.dp))
+            Text(
+                text = "Manage Networks",
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(bottom = 8.dp),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Surface(
+                tonalElevation = 4.dp,
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier
+                    .fillMaxWidth(),
+                color = MaterialTheme.colorScheme.surfaceVariant
+            ) {
+                Column(
+                    modifier = Modifier
+                        .padding(16.dp)
+                        .fillMaxWidth()
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = ripple(color = Color.DarkGray),
+                                onClick = onOpenAllowedNetworks
+                            )
+                    ) {
+                        Image(
+                            painter = painterResource(id = R.drawable.ic_allowed_wifi),
+                            contentDescription = "Allowed networks icon",
+                            alpha = if ( isSystemInDarkTheme()) 0.85f else 1.0f,
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text(
+                            text = "Allowed Networks",
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontSize = 16.sp
+                        )
+                    }
+                    HorizontalDivider(
+                        modifier = Modifier
+                            .offset(y = 4.dp)
+                            .padding(start = 45.dp)
+                            .padding(end = 8.dp)
+                            .padding(top = 8.dp),
+                        thickness = 0.5.dp,
+                        color = Color.Gray.copy(alpha = 0.2f)
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = ripple(color = Color.DarkGray),
+                                onClick = onOpenBlockedNetworks
+                            )
+                    ) {
+                        Image(
+                            painter = painterResource(id = R.drawable.ic_blocked_wifi),
+                            contentDescription = "Blocked networks icon",
+                            alpha = if ( isSystemInDarkTheme()) 0.85f else 1.0f,
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text(
+                            text = "Blocked Networks",
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontSize = 16.sp
+                        )
+                    }
+                }
+            }
+
+            if (showNetworkDialog) {
+                Dialog(
+                    onDismissRequest = { showNetworkDialog = false },
+                    properties = DialogProperties(
+                        usePlatformDefaultWidth = false,
+                        dismissOnBackPress = true,
+                        dismissOnClickOutside = true
+                    )
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize(0.98f)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) { showNetworkDialog = false },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Surface(
+                            modifier = Modifier
+                                .offset(y = (-24).dp)
+                                .fillMaxWidth(0.95f)
+                                .padding(horizontal = 4.dp),
+                            shape = RoundedCornerShape(28.dp),
+                            color = if (isSystemInDarkTheme()) Color(0xFF252525) else Color(0xFFFCFCFC),
+                            tonalElevation = 6.dp
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(24.dp),
+                                horizontalAlignment = Alignment.Start
+                            ) {
+                                Text(
+                                    text = "No Network Detected",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 20.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
 
-                                // RIGHT BUTTON (Wi-Fi)
-                                TextButton(
-                                    onClick = {
-                                        showNetworkDialog = false
-                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                            context.startActivity(Intent("android.settings.panel.action.WIFI"))
-                                        } else {
-                                            context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
-                                        }
-                                    },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clickable(
-                                            interactionSource = remember { MutableInteractionSource() },
-                                            onClick = { /* This is handled by the TextButton's onClick */ }
-                                        )
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                Text(
+                                    text = "Network sharing is only possible when your device is part of a network. Join a Wi-Fi network or create a network using hotspot.",
+                                    fontSize = 16.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+
+                                Spacer(modifier = Modifier.height(24.dp))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("Wi-Fi", color = Color(0xFF2BAED5), fontSize = 16.sp)
+                                    // LEFT BUTTON (Hotspot)
+                                    TextButton(
+                                        onClick = {
+                                            showNetworkDialog = false
+                                            val intent = Intent("android.settings.TETHER_SETTINGS")
+                                            try { context.startActivity(intent) } catch (_: Exception) {
+                                                context.startActivity(Intent(Settings.ACTION_WIRELESS_SETTINGS))
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            // We use clickable here to force the custom ripple color
+                                            .clickable(
+                                                interactionSource = remember { MutableInteractionSource() },
+                                                onClick = { /* This is handled by the TextButton's onClick */ }
+                                            )
+                                    ) {
+                                        Text("Hotspot", color = Color(0xFF2BAED5), fontSize = 16.sp)
+                                    }
+
+                                    // THE DIVIDER LINE (The subtle line you wanted)
+                                    VerticalDivider(
+                                        modifier = Modifier
+                                            .height(20.dp)
+                                            .width(1.dp),
+                                        color = Color.Gray.copy(alpha = 0.2f)
+                                    )
+
+                                    // RIGHT BUTTON (Wi-Fi)
+                                    TextButton(
+                                        onClick = {
+                                            showNetworkDialog = false
+                                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                                context.startActivity(Intent("android.settings.panel.action.WIFI"))
+                                            } else {
+                                                context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable(
+                                                interactionSource = remember { MutableInteractionSource() },
+                                                onClick = { /* This is handled by the TextButton's onClick */ }
+                                            )
+                                    ) {
+                                        Text("Wi-Fi", color = Color(0xFF2BAED5), fontSize = 16.sp)
+                                    }
                                 }
                             }
                         }
@@ -1224,7 +1289,8 @@ fun DiscoveryScreen(
             }
         }
     }
-}
+    }
+
 
 @Composable
 fun FilePickerSection(onBack: () -> Unit) {
