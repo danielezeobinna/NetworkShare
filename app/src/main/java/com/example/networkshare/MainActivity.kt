@@ -84,6 +84,17 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.viewinterop.AndroidView
+import com.google.android.gms.ads.AdError
+import com.google.android.gms.ads.AdListener
+import com.google.android.gms.ads.AdRequest
+import com.google.android.gms.ads.AdSize
+import com.google.android.gms.ads.AdView
+import com.google.android.gms.ads.FullScreenContentCallback
+import com.google.android.gms.ads.LoadAdError
+import com.google.android.gms.ads.MobileAds
+import com.google.android.gms.ads.interstitial.InterstitialAd
+import com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback
 
 class MainActivity : androidx.fragment.app.FragmentActivity() {
     companion object {
@@ -98,6 +109,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     private var isDiscoveryOn by mutableStateOf(false)
     private var isPending by mutableStateOf(false)
     private var showNetworkDialog by mutableStateOf(false)
+    private var interstitialAd: InterstitialAd? = null
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -151,6 +163,8 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        MobileAds.initialize(this) {}
+        loadInterstitialAd()
         WebDAVService.loadPaths(this)
         handleIncomingShare(intent)
         loadAddresses()
@@ -162,41 +176,128 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         setContent {
             NetworkShareTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    when {
-                        !isUnlocked -> {
-                            BiometricGateScreen(onUnlockClick = { showBiometricPrompt() })
-                        }
-
-                        else -> {
-                            val isPickerOpen = remember { mutableStateOf(false) }
-                            val showAllowedNetworks = remember { mutableStateOf(false) }  // ← add
-                            val showBlockedNetworks = remember { mutableStateOf(false) }  // ← add
-
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .navigationBarsPadding()
+                    ) {
+                        // Everything that was in your Surface before
+                        Box(modifier = Modifier.weight(1f)) {
                             when {
-                                showAllowedNetworks.value -> NetworkListScreen(
-                                    title = "Allowed Networks",
-                                    networks = NetworkTrustManager.allowedNetworks,
-                                    iconRes = R.drawable.ic_wifi,
-                                    onRemove = { ssid -> NetworkTrustManager.remove(this, ssid) },
-                                    onBack = { showAllowedNetworks.value = false }
-                                )
-                                showBlockedNetworks.value -> NetworkListScreen(
-                                    title = "Blocked Networks",
-                                    networks = NetworkTrustManager.blockedNetworks,
-                                    iconRes = R.drawable.ic_wifi,
-                                    onRemove = { ssid -> NetworkTrustManager.remove(this, ssid) },
-                                    onBack = { showBlockedNetworks.value = false }
-                                )
-                                !isPickerOpen.value -> DiscoveryScreen(
-                                    isOn = isDiscoveryOn,
-                                    isPending = isPending,
-                                    addresses = serverAddresses,
-                                    onToggle = { start, showDialog -> handleToggle(start, showDialog) },
-                                    onOpenPicker = { isPickerOpen.value = true },
-                                    onOpenAllowedNetworks = { showAllowedNetworks.value = true },   // ← add
-                                    onOpenBlockedNetworks = { showBlockedNetworks.value = true }    // ← add
-                                )
-                                else -> FilePickerSection(onBack = { isPickerOpen.value = false })
+                                !isUnlocked -> {
+                                    BiometricGateScreen(onUnlockClick = { showBiometricPrompt() })
+                                }
+
+                                else -> {
+                                    Column(modifier = Modifier.fillMaxSize()) {
+                                        Box(modifier = Modifier.weight(1f)) {
+                                            val isPickerOpen = remember { mutableStateOf(false) }
+                                            val showAllowedNetworks =
+                                                remember { mutableStateOf(false) }  // ← add
+                                            val showBlockedNetworks =
+                                                remember { mutableStateOf(false) }  // ← add
+
+                                            when {
+                                                showAllowedNetworks.value -> NetworkListScreen(
+                                                    title = "Allowed Networks",
+                                                    networks = NetworkTrustManager.allowedNetworks,
+                                                    iconRes = R.drawable.ic_wifi,
+                                                    onRemove = { ssid ->
+                                                        NetworkTrustManager.remove(
+                                                            this@MainActivity,
+                                                            ssid
+                                                        )
+                                                    },
+                                                    onBack = { showAllowedNetworks.value = false }
+                                                )
+
+                                                showBlockedNetworks.value -> NetworkListScreen(
+                                                    title = "Blocked Networks",
+                                                    networks = NetworkTrustManager.blockedNetworks,
+                                                    iconRes = R.drawable.ic_wifi,
+                                                    onRemove = { ssid ->
+                                                        NetworkTrustManager.remove(
+                                                            this@MainActivity,
+                                                            ssid
+                                                        )
+                                                    },
+                                                    onBack = { showBlockedNetworks.value = false }
+                                                )
+
+                                                !isPickerOpen.value -> DiscoveryScreen(
+                                                    isOn = isDiscoveryOn,
+                                                    isPending = isPending,
+                                                    addresses = serverAddresses,
+                                                    onToggle = { start, showDialog ->
+                                                        handleToggle(
+                                                            start,
+                                                            showDialog
+                                                        )
+                                                    },
+                                                    onOpenPicker = { isPickerOpen.value = true },
+                                                    onOpenAllowedNetworks = {
+                                                        showAllowedNetworks.value = true
+                                                    },   // ← add
+                                                    onOpenBlockedNetworks = {
+                                                        showBlockedNetworks.value = true
+                                                    }    // ← add
+                                                )
+
+                                                else -> FilePickerSection(onBack = {
+                                                    isPickerOpen.value = false
+                                                })
+                                            }
+                                        }
+
+                                        val imeVisible = WindowInsets.ime
+                                            .getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0
+
+                                        var adHeight by remember { mutableStateOf(0.dp) }
+
+                                        @Suppress("COMPOSE_APPLIER_CALL_MISMATCH")
+                                        if (!imeVisible) {
+                                            AndroidView(
+                                                factory = { context ->
+                                                    AdView(context).apply {
+                                                        val displayMetrics =
+                                                            context.resources.displayMetrics
+                                                        val adWidthPixels =
+                                                            displayMetrics.widthPixels.toFloat()
+                                                        val density = displayMetrics.density
+                                                        val adWidth =
+                                                            (adWidthPixels / density).toInt()
+                                                        setAdSize(
+                                                            AdSize.getInlineAdaptiveBannerAdSize(
+                                                                adWidth,
+                                                                65
+                                                            )
+                                                        )
+                                                        adUnitId =
+                                                            "ca-app-pub-3940256099942544/6300978111" // Test ID
+                                                        adListener = object : AdListener() {
+                                                            override fun onAdLoaded() {
+                                                                // Ad loaded — give it space, max 65dp
+                                                                adHeight = 65.dp
+                                                            }
+
+                                                            override fun onAdFailedToLoad(error: LoadAdError) {
+                                                                // No ad — collapse space completely
+                                                                adHeight = 0.dp
+                                                            }
+                                                        }
+                                                        loadAd(AdRequest.Builder().build())
+                                                    }
+                                                },
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .heightIn(
+                                                        min = 0.dp,
+                                                        max = adHeight
+                                                    ) // ← collapses when no ad
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -373,6 +474,22 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         }
     }
 
+    private fun loadInterstitialAd() {
+        InterstitialAd.load(
+            this,
+            "ca-app-pub-3940256099942544/1033173712", // ← test ID for now
+            AdRequest.Builder().build(),
+            object : InterstitialAdLoadCallback() {
+                override fun onAdLoaded(ad: InterstitialAd) {
+                    interstitialAd = ad
+                }
+                override fun onAdFailedToLoad(error: LoadAdError) {
+                    interstitialAd = null
+                }
+            }
+        )
+    }
+
     private fun loadAddresses() {
         val sharedPref = getPreferences(MODE_PRIVATE)
         val saved = sharedPref.getString("last_addresses", "Internal Storage:\nhttp://0.0.0.0:8080/")
@@ -382,6 +499,36 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     private fun handleToggle(start: Boolean, onShowDialog: () -> Unit) {
         if (isPending) return
         isPending = true
+
+        if (start) {
+            interstitialAd?.let { ad ->
+                ad.fullScreenContentCallback = object : FullScreenContentCallback() {
+                    override fun onAdDismissedFullScreenContent() {
+                        interstitialAd = null
+                        loadInterstitialAd()
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        } else {
+                            toggleService(true, onShowDialog)
+                        }
+                    }
+                    override fun onAdFailedToShowFullScreenContent(error: AdError) {
+                        interstitialAd = null
+                        loadInterstitialAd()
+                        // Ad failed, just start service anyway
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        } else {
+                            toggleService(true, onShowDialog)
+                        }
+                    }
+                }
+                ad.show(this)
+                return
+            }
+        }
+
+        // No ad loaded or turning off — proceed normally
         if (start && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {

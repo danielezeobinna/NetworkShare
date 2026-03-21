@@ -30,6 +30,10 @@
         android:theme="@style/Theme.NetworkShare"
         tools:targetApi="30">
 
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="ca-app-pub-8089997046166779~7957807916"/>
+
         <receiver android:name=".NetworkTrustActionReceiver" android:exported="false" />
 
         <receiver android:name=".TransferCancelReceiver" android:exported="false" />
@@ -41,7 +45,7 @@
 
         <activity
             android:name=".MainActivity"
-            android:launchMode="singleInstance"
+            android:launchMode="singleTask"
             android:taskAffinity=""
             android:exported="true"
             android:windowSoftInputMode="adjustResize"

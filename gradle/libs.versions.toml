@@ -15,6 +15,8 @@ material3Lint = "1.4.0"
 uiText = "1.10.4"
 androidxFoundation = "1.10.4"
 ui = "1.10.4"
+uiVersion = "1.10.5"
+playServicesAdsApi = "25.1.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -38,6 +40,8 @@ androidx-compose-material3-lint = { group = "androidx.compose.material3", name =
 androidx-compose-ui-text = { group = "androidx.compose.ui", name = "ui-text", version.ref = "uiText" }
 foundation = { group = "androidx.compose.foundation", name = "foundation", version.ref = "androidxFoundation" }
 androidx-ui = { group = "androidx.compose.ui", name = "ui", version.ref = "ui" }
+ui = { group = "androidx.compose.ui", name = "ui", version.ref = "uiVersion" }
+play-services-ads-api = { group = "com.google.android.gms", name = "play-services-ads-api", version.ref = "playServicesAdsApi" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
