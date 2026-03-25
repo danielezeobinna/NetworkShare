@@ -1,6 +1,7 @@
 package com.example.networkshare
 
 import android.Manifest
+import android.app.Activity
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -79,6 +80,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.expandVertically
@@ -95,6 +97,12 @@ import com.google.android.gms.ads.LoadAdError
 import com.google.android.gms.ads.MobileAds
 import com.google.android.gms.ads.interstitial.InterstitialAd
 import com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalView
+import androidx.core.graphics.toColorInt
+import androidx.core.view.WindowCompat
+import com.example.networkshare.ui.theme.AppTheme
+import com.example.networkshare.ui.theme.LocalDarkTheme
 
 class MainActivity : androidx.fragment.app.FragmentActivity() {
     companion object {
@@ -110,6 +118,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     private var isPending by mutableStateOf(false)
     private var showNetworkDialog by mutableStateOf(false)
     private var interstitialAd: InterstitialAd? = null
+    private var appTheme by mutableStateOf(AppTheme.SYSTEM)
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -173,8 +182,32 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         showBiometricPrompt()
         if (isDiscoveryOn) updateAddresses()
 
+        val savedTheme = getPreferences(MODE_PRIVATE).getString("app_theme", "SYSTEM")
+        appTheme = AppTheme.valueOf(savedTheme ?: "SYSTEM")
+
         setContent {
-            NetworkShareTheme {
+            NetworkShareTheme(appTheme = appTheme) {
+                val darkTheme = when (appTheme) {
+                    AppTheme.LIGHT -> false
+                    AppTheme.DARK -> true
+                    AppTheme.SYSTEM -> isSystemInDarkTheme()
+                }
+
+                val showUserGuide = remember { mutableStateOf(false) }
+
+                val view = LocalView.current
+                if (!view.isInEditMode) {
+                    SideEffect {
+                        val window = (view.context as Activity).window
+                        WindowCompat.getInsetsController(window, view).apply {
+                            isAppearanceLightStatusBars = !darkTheme
+                            isAppearanceLightNavigationBars = !darkTheme
+                        }
+                        @Suppress("DEPRECATION")
+                        window.navigationBarColor = if (darkTheme) "#010101".toColorInt() else "#EEF1F3".toColorInt()
+                    }
+                }
+
                 Surface(modifier = Modifier.fillMaxSize()) {
                     Column(
                         modifier = Modifier
@@ -198,6 +231,10 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                                 remember { mutableStateOf(false) }  // ← add
 
                                             when {
+                                                showUserGuide.value -> UserGuideScreen(
+                                                    onBack = { showUserGuide.value = false }
+                                                )
+
                                                 showAllowedNetworks.value -> NetworkListScreen(
                                                     title = "Allowed Networks",
                                                     networks = NetworkTrustManager.allowedNetworks,
@@ -240,7 +277,20 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                                     },   // ← add
                                                     onOpenBlockedNetworks = {
                                                         showBlockedNetworks.value = true
-                                                    }    // ← add
+                                                    },    // ← add
+                                                    onOpenUserGuide = {
+                                                        showUserGuide.value = true
+                                                    },
+                                                    currentTheme = appTheme,
+                                                    onThemeChange = { theme ->
+                                                        appTheme = theme
+                                                        getPreferences(MODE_PRIVATE).edit { putString("app_theme", theme.name) }
+                                                    },
+                                                    isDark = when (appTheme) {
+                                                        AppTheme.LIGHT -> false
+                                                        AppTheme.DARK -> true
+                                                        AppTheme.SYSTEM -> isSystemInDarkTheme()
+                                                    },
                                                 )
 
                                                 else -> FilePickerSection(onBack = {
@@ -772,8 +822,11 @@ fun DiscoveryScreen(
     onOpenPicker: () -> Unit,
     onOpenAllowedNetworks: () -> Unit,
     onOpenBlockedNetworks: () -> Unit,
+    onThemeChange: (AppTheme) -> Unit,
+    currentTheme: AppTheme,
+    isDark: Boolean,
+    onOpenUserGuide: () -> Unit,
 ) {
-    val isDark = isSystemInDarkTheme()
     val context = LocalContext.current
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -793,6 +846,12 @@ fun DiscoveryScreen(
             WebDAVService.password.value != originalPassword
 
     var showNetworkDialog by remember { mutableStateOf(false) }
+    var showMenu by remember { mutableStateOf(false) }
+    var themeExpanded by remember { mutableStateOf(false) }
+    val themeRotation by animateFloatAsState(
+        targetValue = if (themeExpanded) 90f else 0f,
+        label = "themeArrow"
+    )
 
     LaunchedEffect(Unit) {
         val intent = Intent(context, WebDAVService::class.java).apply {
@@ -817,7 +876,7 @@ fun DiscoveryScreen(
                             bgColor.copy(alpha = 0f)
                         ),
                         startY = 0f,
-                        endY = 40.dp.toPx()
+                        endY = 24.dp.toPx()
                     )
                 )
             }
@@ -895,7 +954,7 @@ fun DiscoveryScreen(
                         Text(
                             text = "Choose Shared Paths...",
                             fontSize = 16.sp,
-                            style = MaterialTheme.typography.labelLarge,
+                            style = MaterialTheme.typography.labelMedium,
                             color = Color(0xFF2BAED5)
                         )
                     }
@@ -1106,7 +1165,10 @@ fun DiscoveryScreen(
                                             WebDAVService.savePaths(context)
                                         }
                                     },
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                    contentPadding = PaddingValues(
+                                        horizontal = 8.dp,
+                                        vertical = 4.dp
+                                    )
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         val label =
@@ -1280,7 +1342,7 @@ fun DiscoveryScreen(
                         Image(
                             painter = painterResource(id = R.drawable.ic_allowed_wifi),
                             contentDescription = "Allowed networks icon",
-                            alpha = if ( isSystemInDarkTheme()) 0.85f else 1.0f,
+                            alpha = if (isDark) 0.85f else 1.0f,
                             modifier = Modifier.size(28.dp)
                         )
                         Spacer(modifier = Modifier.width(16.dp))
@@ -1315,7 +1377,7 @@ fun DiscoveryScreen(
                         Image(
                             painter = painterResource(id = R.drawable.ic_blocked_wifi),
                             contentDescription = "Blocked networks icon",
-                            alpha = if ( isSystemInDarkTheme()) 0.85f else 1.0f,
+                            alpha = if (isDark) 0.85f else 1.0f,
                             modifier = Modifier.size(28.dp)
                         )
                         Spacer(modifier = Modifier.width(16.dp))
@@ -1352,7 +1414,7 @@ fun DiscoveryScreen(
                                 .fillMaxWidth(0.95f)
                                 .padding(horizontal = 4.dp),
                             shape = RoundedCornerShape(28.dp),
-                            color = if (isSystemInDarkTheme()) Color(0xFF252525) else Color(0xFFFCFCFC),
+                            color = if (isDark) Color(0xFF252525) else Color(0xFFFCFCFC),
                             tonalElevation = 6.dp
                         ) {
                             Column(
@@ -1386,7 +1448,9 @@ fun DiscoveryScreen(
                                         onClick = {
                                             showNetworkDialog = false
                                             val intent = Intent("android.settings.TETHER_SETTINGS")
-                                            try { context.startActivity(intent) } catch (_: Exception) {
+                                            try {
+                                                context.startActivity(intent)
+                                            } catch (_: Exception) {
                                                 context.startActivity(Intent(Settings.ACTION_WIRELESS_SETTINGS))
                                             }
                                         },
@@ -1435,8 +1499,160 @@ fun DiscoveryScreen(
                 }
             }
         }
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(8.dp)
+        ) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(androidx.compose.foundation.shape.CircleShape)
+                    .background(
+                        color = MaterialTheme.colorScheme.background,
+                        shape = androidx.compose.foundation.shape.CircleShape
+                    )
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = ripple(
+                            color = Color.Gray,
+                            bounded = true,
+                            radius = 19.dp
+                        ),
+                        onClick = { showMenu = true }
+                    )
+            ) {
+                Icon(
+                    painter = painterResource(id = R.drawable.baseline_dehaze),
+                    contentDescription = "Menu",
+                    tint = Color(0xFF666660),
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+
+            DropdownMenu(
+                expanded = showMenu,
+                onDismissRequest = { showMenu = false },
+                modifier = Modifier.background(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                )
+            ) {
+                DropdownMenuItem(
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.baseline_guide),
+                                contentDescription = null,
+                                tint = Color(0xFF2BAED5),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = "User Guide",
+                                fontSize = 15.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    },
+                    onClick = {
+                        showMenu = false
+                        onOpenUserGuide()
+                    }
+                )
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 12.dp),
+                    thickness = 0.5.dp,
+                    color = Color.Gray.copy(alpha = 0.2f)
+                )
+                DropdownMenuItem(
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.baseline_color_lens),
+                                contentDescription = null,
+                                tint = Color(0xFF2BAED5),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = "Appearance",
+                                fontSize = 15.sp,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Icon(
+                                painter = painterResource(id = R.drawable.baseline_chevron_right),
+                                contentDescription = null,
+                                tint = Color.Gray,
+                                modifier = Modifier
+                                    .size(18.dp)
+                                    .graphicsLayer { rotationZ = themeRotation }
+                            )
+                        }
+                    },
+                    onClick = { themeExpanded = !themeExpanded }
+                )
+
+// Animated theme options dropdown
+                AnimatedVisibility(
+                    visible = themeExpanded,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    Column {
+                        listOf(
+                            Triple(AppTheme.LIGHT, "Light", R.drawable.baseline_light_mode),
+                            Triple(AppTheme.DARK, "Dark", R.drawable.baseline_dark_mode),
+                            Triple(AppTheme.SYSTEM, "System", R.drawable.baseline_system_mode)
+                        ).forEach { (theme, label, icon) ->
+                            val isSelected = currentTheme == theme
+                            DropdownMenuItem(
+                                text = {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(start = 32.dp) // ← indent under App Themes
+                                    ) {
+                                        Icon(
+                                            painter = painterResource(id = icon),
+                                            contentDescription = null,
+                                            tint = if (isSelected) Color(0xFF2BAED5) else Color.Gray,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Text(
+                                            text = label,
+                                            fontSize = 15.sp,
+                                            color = if (isSelected) Color(0xFF2BAED5)
+                                            else MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        // Checkmark for selected
+                                        if (isSelected) {
+                                            Icon(
+                                                painter = painterResource(id = R.drawable.baseline_check),
+                                                contentDescription = null,
+                                                tint = Color(0xFF2BAED5),
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    onThemeChange(theme)
+                                    showMenu = false
+                                    themeExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
-    }
+}
 
 
 @Composable
@@ -1647,6 +1863,7 @@ fun StorageRow(
     fullPath: String,
     onClick: () -> Unit
 ) {
+    val isDark = LocalDarkTheme.current
     val context = LocalContext.current
     val isChecked = remember(fullPath, WebDAVService.selectedPaths.size) {
         WebDAVService.selectedPaths.contains(fullPath)
@@ -1658,9 +1875,9 @@ fun StorageRow(
         }
     }
 
-    val inheritedColor = if (isSystemInDarkTheme()) Color.Gray else Color.LightGray
+    val inheritedColor = if (isDark) Color.Gray else Color.LightGray
 
-    val inheritedCheck = if (isSystemInDarkTheme()) Color.LightGray else Color.White
+    val inheritedCheck = if (isDark) Color.LightGray else Color.White
 
     val isPartiallyChecked = remember(fullPath, WebDAVService.selectedPaths.size) {
         !isChecked && !isInherited && WebDAVService.selectedPaths.any { shared ->
@@ -1742,7 +1959,7 @@ fun StorageRow(
                     contentDescription = "Selected",
                     tint = if (isInherited) {
                         inheritedCheck
-                    } else if (isSystemInDarkTheme()) {
+                    } else if (isDark) {
                         Color.Black
                     } else {
                         Color.White
@@ -1760,26 +1977,61 @@ fun StorageRow(
 
 @Composable
 fun BiometricGateScreen(onUnlockClick: () -> Unit) {
-    // Automatically try to show the prompt when this screen appears
+    val isDark = LocalDarkTheme.current
     LaunchedEffect(Unit) { onUnlockClick() }
 
     Column(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .padding(24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Image(
-            painter = painterResource(id = R.drawable.baseline_lock), // Or a lock icon
-            contentDescription = null,
-            modifier = Modifier.size(64.dp)
-        )
-        Spacer(modifier = Modifier.height(16.dp))
-        Text("App Locked", color = MaterialTheme.colorScheme.onSurface, fontSize = 20.sp)
-        Spacer(modifier = Modifier.height(8.dp))
-        Button(onClick = onUnlockClick) {
-            Text(text = "Verify Authentication",
-                color = if (isSystemInDarkTheme()) Color.Black else Color.White
-            )
+        Surface(
+            tonalElevation = 4.dp,
+            shape = MaterialTheme.shapes.medium,
+            modifier = Modifier.fillMaxWidth(),
+            color = MaterialTheme.colorScheme.surfaceVariant
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(24.dp)
+                    .fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Image(
+                    painter = painterResource(id = R.drawable.baseline_lock),
+                    contentDescription = null,
+                    modifier = Modifier.size(64.dp)
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = "App Locked",
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Authenticate to manage your server",
+                    color = Color.Gray,
+                    fontSize = 14.sp
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+                Button(
+                    onClick = onUnlockClick,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF2BAED5)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Verify to Unlock",
+                        color = if (isDark) Color.Black else Color.White
+                    )
+                }
+            }
         }
     }
 }
@@ -1931,6 +2183,67 @@ fun NetworkRow(
                 tint = Color.Gray,
                 modifier = Modifier.size(18.dp)
             )
+        }
+    }
+}
+
+@Composable
+fun UserGuideScreen(onBack: () -> Unit) {
+    BackHandler { onBack() }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+        ) {
+            Spacer(modifier = Modifier.height(32.dp))
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+            ) {
+                IconButton(
+                    onClick = onBack,
+                    modifier = Modifier.size(32.dp).offset(x = (-8).dp)
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.baseline_chevron_left),
+                        contentDescription = "Back",
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Text(
+                    text = "User Guide",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "Coming Soon...",
+                    color = Color.Gray,
+                    fontSize = 15.sp
+                )
+            }
         }
     }
 }

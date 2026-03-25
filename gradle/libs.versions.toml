@@ -17,6 +17,7 @@ androidxFoundation = "1.10.4"
 ui = "1.10.4"
 uiVersion = "1.10.5"
 playServicesAdsApi = "25.1.0"
+androidxFoundationVersion = "1.10.5"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -42,6 +43,7 @@ foundation = { group = "androidx.compose.foundation", name = "foundation", versi
 androidx-ui = { group = "androidx.compose.ui", name = "ui", version.ref = "ui" }
 ui = { group = "androidx.compose.ui", name = "ui", version.ref = "uiVersion" }
 play-services-ads-api = { group = "com.google.android.gms", name = "play-services-ads-api", version.ref = "playServicesAdsApi" }
+androidx-compose-foundation-foundation = { group = "androidx.compose.foundation", name = "foundation", version.ref = "androidxFoundationVersion" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
