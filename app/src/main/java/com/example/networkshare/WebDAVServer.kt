@@ -477,15 +477,27 @@ class WebDAVServer(
     }
 
     private fun handlePut(session: IHTTPSession, target: File): Response {
-        val tempFile   = File(target.parentFile, "${target.name}.${UUID.randomUUID()}.tmp")
+        val tempFile   = File(target.parentFile, ".~${target.name}.${UUID.randomUUID()}.tmp")
         val sessionKey = "${session.remoteIpAddress}|${session.headers["user-agent"]}"
+        val isReplace  = target.exists()
+
+        if (isReplace && !PersistenceGuard.isSafeToDelete(context, target.absolutePath)) {
+            Log.w(tag, "Safety Lock Active: Blocking PUT (replace) for ${target.name}")
+            return newFixedLengthResponse(Response.Status.FORBIDDEN, MIME_PLAINTEXT, "Safety Lock Active")
+        }
 
         return try {
             target.parentFile?.mkdirs()
-            val inputStream    = session.inputStream
-            val contentLength  = session.headers["content-length"]?.toLong() ?: 0L
+            val inputStream   = session.inputStream
+            val contentLength = session.headers["content-length"]?.toLong() ?: 0L
 
-            DigestAuthManager.pauseTimer(sessionKey) // ← freeze idle countdown
+            DigestAuthManager.pauseTimer(sessionKey)
+
+            // If we're replacing an existing file, lock it immediately so a
+            // DELETE arriving during or after a failed upload is blocked.
+            if (isReplace) {
+                PersistenceGuard.markStarted(context, target.absolutePath)
+            }
 
             tempFile.outputStream().use { output ->
                 val buffer         = ByteArray(65536)
@@ -496,6 +508,7 @@ class WebDAVServer(
                     if (WebDAVService.isCancelled(target.name)) {
                         WebDAVService.clearCancel(target.name)
                         tempFile.delete()
+                        // Lock stays active — original file is protected.
                         return newFixedLengthResponse(Response.Status.FORBIDDEN, MIME_PLAINTEXT, "Transfer cancelled by user.")
                     }
 
@@ -512,23 +525,27 @@ class WebDAVServer(
                 }
             }
 
-            if (tempFile.length() == contentLength || contentLength == 0L) {
+            if (tempFile.length() == contentLength || (contentLength == 0L && !isReplace)) {
                 if (target.exists()) target.delete()
                 if (tempFile.renameTo(target)) {
+                    // Upload fully completed — safe to delete now (clear any lock).
+                    if (isReplace) PersistenceGuard.clear(context, target.absolutePath)
                     newFixedLengthResponse(Response.Status.CREATED, MIME_PLAINTEXT, "")
                 } else {
                     throw IOException("Failed to move temp file to destination")
                 }
             } else {
                 tempFile.delete()
+                // Incomplete upload — lock stays on the original if it's a replace.
                 newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Transfer incomplete")
             }
 
         } catch (e: Exception) {
             if (tempFile.exists()) tempFile.delete()
+            // Lock intentionally NOT cleared — protects original on unexpected failure.
             newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, e.message)
         } finally {
-            DigestAuthManager.resumeTimer(sessionKey) // ← resume idle countdown
+            DigestAuthManager.resumeTimer(sessionKey)
             listener.onTransferComplete(target.name)
         }
     }
@@ -718,7 +735,9 @@ class WebDAVServer(
         val depth = session.headers["depth"] ?: "1"
 
         if (target.isDirectory && depth != "0") {
-            target.listFiles()?.forEach { child ->
+            target.listFiles()?.filter { child ->
+                !child.name.startsWith(".~") // hide in-progress temp files
+            }?.forEach { child ->
                 val childPath = child.absolutePath
                 val isVisible = allowedPaths.any { allowed ->
                     childPath == allowed ||

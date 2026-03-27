@@ -79,12 +79,7 @@ class WebDAVService : Service(), TransferListener {
             return START_STICKY
         }
 
-        if (!isNetworkAvailable()) {
-            sendBroadcast(Intent("com.example.networkshare.NO_NETWORK_DETECTED"))
-        }
-
         createNotificationChannel()
-        registerNetworkCallback()
         NetworkTrustManager.ensureChannel(      // ← add this
             getSystemService(NotificationManager::class.java)
         )
@@ -130,6 +125,7 @@ class WebDAVService : Service(), TransferListener {
         startForeground(1, notification)
 
         startWebDAVServers()
+        registerNetworkCallback()
         broadcastCurrentAddresses()
 
         return START_STICKY
@@ -233,7 +229,9 @@ class WebDAVService : Service(), TransferListener {
 
         if (!isOnHotspot) {
             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                updateNetworkTrust()
+                if (activeServers.isNotEmpty()) {
+                    updateNetworkTrust()
+                }
             }, 1500)
         }
 
@@ -375,7 +373,9 @@ class WebDAVService : Service(), TransferListener {
                             when (NetworkTrustManager.getTrust(ssid)) {
                                 NetworkTrustManager.Trust.UNKNOWN -> {
                                     Log.d(tag, "Unknown network — showing notification for: $ssid")
-                                    NetworkTrustManager.showTrustNotification(this@WebDAVService, ssid)
+                                    val silent = isAppInForeground()
+                                    pendingTrustSsid.value = ssid
+                                    NetworkTrustManager.showTrustNotification(this@WebDAVService, ssid, silent)
                                 }
                                 NetworkTrustManager.Trust.BLOCKED -> {
                                     Log.d(tag, "Blocked network: $ssid — server will return 403")
@@ -419,7 +419,9 @@ class WebDAVService : Service(), TransferListener {
                             when (NetworkTrustManager.getTrust(ssid)) {
                                 NetworkTrustManager.Trust.UNKNOWN -> {
                                     Log.d(tag, "Unknown network — showing notification for: $ssid")
-                                    NetworkTrustManager.showTrustNotification(this@WebDAVService, ssid)
+                                    val silent = isAppInForeground()
+                                    pendingTrustSsid.value = ssid
+                                    NetworkTrustManager.showTrustNotification(this@WebDAVService, ssid, silent)
                                 }
                                 NetworkTrustManager.Trust.BLOCKED -> {
                                     Log.d(tag, "Blocked network: $ssid — server will return 403")
@@ -491,6 +493,15 @@ class WebDAVService : Service(), TransferListener {
         }
     }
 
+    private fun isAppInForeground(): Boolean {
+        val activityManager = getSystemService(ACTIVITY_SERVICE) as ActivityManager
+        val appProcesses = activityManager.runningAppProcesses ?: return false
+        return appProcesses.any {
+            it.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND &&
+                    it.processName == packageName
+        }
+    }
+
     private fun updateNetworkTrust() {
         val isOnHotspot = try {
             val wifiManager = applicationContext
@@ -503,6 +514,9 @@ class WebDAVService : Service(), TransferListener {
         if (isOnHotspot) {
             isNetworkTrusted.value = true
             networkState.value = NetworkState.TRUSTED
+            if (activeServers.isNotEmpty()) {
+                NetworkTrustManager.restoreSharingNotification(this)
+                }
             Log.d(tag, "Hotspot active — always trusted")
             return
         }
@@ -530,6 +544,9 @@ class WebDAVService : Service(), TransferListener {
             ssid.isBlank() || ssid == "<unknown ssid>" -> {
                 isNetworkTrusted.value = false
                 networkState.value = NetworkState.NO_NETWORK
+                if (activeServers.isNotEmpty()) {
+                    NetworkTrustManager.showNoNetworkNotification(this)
+                }
             }
 
             NetworkTrustManager.isHotspot(ssid) -> {
@@ -541,6 +558,9 @@ class WebDAVService : Service(), TransferListener {
                     NetworkTrustManager.getTrust(ssid) == NetworkTrustManager.Trust.ALLOW_ONCE -> {
                 isNetworkTrusted.value = true
                 networkState.value = NetworkState.TRUSTED
+                if (activeServers.isNotEmpty()) {
+                    NetworkTrustManager.restoreSharingNotification(this)
+                }
             }
 
             else -> {
@@ -553,16 +573,18 @@ class WebDAVService : Service(), TransferListener {
     private fun verifyAndStop() {
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
             if (!isNetworkAvailable()) {
-                sendBroadcast(Intent("com.example.networkshare.NO_NETWORK_DETECTED"))
                 networkState.value = NetworkState.NO_NETWORK
                 isNetworkTrusted.value = false
+                if (activeServers.isNotEmpty()) {
+                    NetworkTrustManager.showNoNetworkNotification(this)
+                }
                 broadcastCurrentAddresses()
-                updateNetworkTrust()
             } else {
                 refreshServersIfNeeded()
             }
         }, 1500)
     }
+
 
     override fun onDestroy() {
         Log.d(tag, "Service stopping, cleaning up servers...")
@@ -613,6 +635,7 @@ class WebDAVService : Service(), TransferListener {
         var networkState = mutableStateOf(NetworkState.NO_NETWORK)
         var isAuthEnabled = mutableStateOf(true)
         var isNetworkTrusted = mutableStateOf(false)
+        var pendingTrustSsid = mutableStateOf<String?>(null)
         var username = mutableStateOf("user")
         var password = mutableStateOf("pass")
         private val cancelledFiles = Collections.synchronizedSet(mutableSetOf<String>())

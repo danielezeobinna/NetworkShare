@@ -88,7 +88,7 @@ object NetworkTrustManager {
 
     // ── Notification ─────────────────────────────────────────
 
-    fun showTrustNotification(context: Context, ssid: String) {
+    fun showTrustNotification(context: Context, ssid: String, silent: Boolean = false) {
         val manager = context.getSystemService(NotificationManager::class.java)
         ensureChannel(manager)
 
@@ -108,18 +108,89 @@ object NetworkTrustManager {
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_name)
             .setContentTitle("Unknown Network")
-            .setContentText("\"$ssid\" is not a trusted network. Allow sharing on it?")
+            .setContentText("\"$ssid\" is unknown. Allow file sharing on this network?")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
             .setOngoing(true)
             .setColor("#2BAED5".toColorInt())
-            .setAutoCancel(true)
+            .setAutoCancel(false)
+            .also { if (silent) it.setSilent(true) }
             .addAction(0, "Allow",      pendingFor(ACTION_ALLOW))
             .addAction(0, "Allow Once", pendingFor(ACTION_ALLOW_ONCE))
             .addAction(0, "Block",      pendingFor(ACTION_BLOCK))
             .build()
 
-        manager?.notify(ssid.hashCode(), notification)
+        // ID 1 — replaces the "Network sharing is on" notification
+        manager?.notify(1, notification)
+    }
+
+    fun showNoNetworkNotification(context: Context) {
+        val manager = context.getSystemService(NotificationManager::class.java)
+
+        val contentIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        val contentPendingIntent = PendingIntent.getActivity(
+            context, 1, contentIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val stopIntent = Intent(context, WebDAVService::class.java).apply {
+            action = "STOP_SERVICE"
+        }
+        val stopPendingIntent = PendingIntent.getService(
+            context, 0, stopIntent,
+            PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(context, "WebDAV_Service_Channel")
+            .setSmallIcon(R.drawable.ic_stat_name)
+            .setColor(android.graphics.Color.GRAY)
+            .setContentTitle("Network sharing is turned on")
+            .setContentText("No network available. Connect or create a network to start sharing.")
+            .setOngoing(true)
+            .setSilent(true)
+            .setContentIntent(contentPendingIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "TURN OFF", stopPendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+
+        manager?.notify(1, notification)
+    }
+
+    // ADD this new function right after showTrustNotification:
+    fun restoreSharingNotification(context: Context) {
+        val manager = context.getSystemService(NotificationManager::class.java)
+
+        val contentIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        val contentPendingIntent = PendingIntent.getActivity(
+            context, 1, contentIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val stopIntent = Intent(context, WebDAVService::class.java).apply {
+            action = "STOP_SERVICE"
+        }
+        val stopPendingIntent = PendingIntent.getService(
+            context, 0, stopIntent,
+            PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(context, "WebDAV_Service_Channel")
+            .setSmallIcon(R.drawable.ic_stat_name)
+            .setContentTitle("Network sharing is turned on")
+            .setContentText("Your phone can be accessed by other devices on this network")
+            .setOngoing(true)
+            .setColor("#2BAED5".toColorInt())
+            .setContentIntent(contentPendingIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "TURN OFF", stopPendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setSilent(true)
+            .build()
+
+        manager?.notify(1, notification)
     }
 
     fun ensureChannel(manager: NotificationManager?) {
@@ -148,7 +219,9 @@ class NetworkTrustActionReceiver : BroadcastReceiver() {
             NetworkTrustManager.ACTION_ALLOW_ONCE -> NetworkTrustManager.allowOnce(ssid)
             NetworkTrustManager.ACTION_BLOCK      -> NetworkTrustManager.block(context, ssid)
         }
-        context.getSystemService(NotificationManager::class.java)
-            ?.cancel(ssid.hashCode())
+        // Clear pending trust so dialog doesn't re-trigger
+        WebDAVService.pendingTrustSsid.value = null
+        // Restore the "Network sharing is on" notification
+        NetworkTrustManager.restoreSharingNotification(context)
     }
 }

@@ -103,6 +103,7 @@ import androidx.core.graphics.toColorInt
 import androidx.core.view.WindowCompat
 import com.example.networkshare.ui.theme.AppTheme
 import com.example.networkshare.ui.theme.LocalDarkTheme
+import kotlinx.coroutines.delay
 
 class MainActivity : androidx.fragment.app.FragmentActivity() {
     companion object {
@@ -116,22 +117,19 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     private var serverAddresses by mutableStateOf("Internal Storage:\nhttp://0.0.0.0:8080/")
     private var isDiscoveryOn by mutableStateOf(false)
     private var isPending by mutableStateOf(false)
-    private var showNetworkDialog by mutableStateOf(false)
+    private var showUnknownNetworkDialog by mutableStateOf(false)
     private var interstitialAd: InterstitialAd? = null
     private var appTheme by mutableStateOf(AppTheme.SYSTEM)
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) toggleService(true) { showNetworkDialog = true }
+        if (granted) toggleService(true)
     }
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
-                "com.example.networkshare.NO_NETWORK_DETECTED" -> {
-                    showNetworkDialog = true
-                }
                 "com.example.networkshare.SERVER_STOPPED" -> {
                     isDiscoveryOn = false
                 }
@@ -230,6 +228,172 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                             val showBlockedNetworks =
                                                 remember { mutableStateOf(false) }  // ← add
 
+                                            val pendingTrustSsid = WebDAVService.pendingTrustSsid.value
+
+                                            LaunchedEffect(pendingTrustSsid) {
+                                                if (pendingTrustSsid != null && isDiscoveryOn) showUnknownNetworkDialog = true
+                                            }
+
+                                            if (showUnknownNetworkDialog && pendingTrustSsid != null) {
+                                                val isDark = when (appTheme) {
+                                                    AppTheme.LIGHT -> false
+                                                    AppTheme.DARK -> true
+                                                    AppTheme.SYSTEM -> isSystemInDarkTheme()
+                                                }
+                                                Dialog(
+                                                    onDismissRequest = { showUnknownNetworkDialog = false },
+                                                    properties = DialogProperties(
+                                                        usePlatformDefaultWidth = false,
+                                                        dismissOnBackPress = true,
+                                                        dismissOnClickOutside = true
+                                                    )
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .fillMaxSize(0.98f)
+                                                            .clickable(
+                                                                interactionSource = remember { MutableInteractionSource() },
+                                                                indication = null
+                                                            ) { showUnknownNetworkDialog = false },
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Surface(
+                                                            modifier = Modifier
+                                                                .offset(y = (-24).dp)
+                                                                .fillMaxWidth(0.95f)
+                                                                .padding(horizontal = 4.dp),
+                                                            shape = RoundedCornerShape(28.dp),
+                                                            color = if (isDark) Color(0xFF252525) else Color(0xFFFCFCFC),
+                                                            tonalElevation = 6.dp
+                                                        ) {
+                                                            Column(
+                                                                modifier = Modifier.padding(24.dp),
+                                                                horizontalAlignment = Alignment.Start
+                                                            ) {
+                                                                Text(
+                                                                    text = "Unknown Network Detected",
+                                                                    fontWeight = FontWeight.Bold,
+                                                                    fontSize = 20.sp,
+                                                                    color = MaterialTheme.colorScheme.onSurface
+                                                                )
+
+                                                                Spacer(modifier = Modifier.height(16.dp))
+
+                                                                Text(
+                                                                    text = "\"$pendingTrustSsid\" is an unknown network. Choose whether NetworkShare should share files on this network.",
+                                                                    fontSize = 16.sp,
+                                                                    color = MaterialTheme.colorScheme.onSurface
+                                                                )
+
+                                                                Spacer(modifier = Modifier.height(24.dp))
+
+                                                                Row(
+                                                                    modifier = Modifier.fillMaxWidth(),
+                                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                                    verticalAlignment = Alignment.CenterVertically
+                                                                ) {
+                                                                    Column(modifier = Modifier.fillMaxWidth()) {
+                                                                        TextButton(
+                                                                            onClick = {
+                                                                                NetworkTrustManager.allow(
+                                                                                    this@MainActivity,
+                                                                                    pendingTrustSsid
+                                                                                )
+                                                                                WebDAVService.pendingTrustSsid.value =
+                                                                                    null
+                                                                                NetworkTrustManager.restoreSharingNotification(
+                                                                                    this@MainActivity
+                                                                                )
+                                                                                showUnknownNetworkDialog =
+                                                                                    false
+                                                                            },
+                                                                            modifier = Modifier.fillMaxWidth()
+                                                                        ) {
+                                                                            Text(
+                                                                                "Allow",
+                                                                                color = Color(
+                                                                                    0xFF2BAED5
+                                                                                ),
+                                                                                fontSize = 16.sp
+                                                                            )
+                                                                        }
+
+                                                                        HorizontalDivider(
+                                                                            modifier = Modifier.padding(
+                                                                                horizontal = 8.dp
+                                                                            ),
+                                                                            thickness = 0.5.dp,
+                                                                            color = Color.Gray.copy(
+                                                                                alpha = 0.2f
+                                                                            )
+                                                                        )
+
+                                                                        TextButton(
+                                                                            onClick = {
+                                                                                NetworkTrustManager.allowOnce(
+                                                                                    pendingTrustSsid
+                                                                                )
+                                                                                WebDAVService.pendingTrustSsid.value =
+                                                                                    null
+                                                                                NetworkTrustManager.restoreSharingNotification(
+                                                                                    this@MainActivity
+                                                                                )
+                                                                                showUnknownNetworkDialog =
+                                                                                    false
+                                                                            },
+                                                                            modifier = Modifier.fillMaxWidth()
+                                                                        ) {
+                                                                            Text(
+                                                                                "Allow Once",
+                                                                                color = Color(
+                                                                                    0xFF2BAED5
+                                                                                ),
+                                                                                fontSize = 16.sp
+                                                                            )
+                                                                        }
+
+                                                                        HorizontalDivider(
+                                                                            modifier = Modifier.padding(
+                                                                                horizontal = 8.dp
+                                                                            ),
+                                                                            thickness = 0.5.dp,
+                                                                            color = Color.Gray.copy(
+                                                                                alpha = 0.2f
+                                                                            )
+                                                                        )
+
+                                                                        TextButton(
+                                                                            onClick = {
+                                                                                NetworkTrustManager.block(
+                                                                                    this@MainActivity,
+                                                                                    pendingTrustSsid
+                                                                                )
+                                                                                WebDAVService.pendingTrustSsid.value =
+                                                                                    null
+                                                                                NetworkTrustManager.restoreSharingNotification(
+                                                                                    this@MainActivity
+                                                                                )
+                                                                                showUnknownNetworkDialog =
+                                                                                    false
+                                                                            },
+                                                                            modifier = Modifier.fillMaxWidth()
+                                                                        ) {
+                                                                            Text(
+                                                                                "Block",
+                                                                                color = Color(
+                                                                                    0xFF2BAED5
+                                                                                ),
+                                                                                fontSize = 16.sp
+                                                                            )
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+
                                             when {
                                                 showUserGuide.value -> UserGuideScreen(
                                                     onBack = { showUserGuide.value = false }
@@ -265,11 +429,8 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                                     isOn = isDiscoveryOn,
                                                     isPending = isPending,
                                                     addresses = serverAddresses,
-                                                    onToggle = { start, showDialog ->
-                                                        handleToggle(
-                                                            start,
-                                                            showDialog
-                                                        )
+                                                    onToggle = { start->
+                                                        handleToggle(start)
                                                     },
                                                     onOpenPicker = { isPickerOpen.value = true },
                                                     onOpenAllowedNetworks = {
@@ -474,7 +635,6 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         val filter = IntentFilter().apply {
             addAction("com.example.networkshare.SERVER_STOPPED")
             addAction("com.example.networkshare.ADDRESSES_UPDATED")
-            addAction("com.example.networkshare.NO_NETWORK_DETECTED")
         }
         val listenFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             RECEIVER_NOT_EXPORTED
@@ -508,6 +668,10 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                 }
                 startService(intent)
             }, 1500)
+        }
+        val pending = WebDAVService.pendingTrustSsid.value
+        if (pending != null && isDiscoveryOn) {
+            showUnknownNetworkDialog = true
         }
     }
 
@@ -546,7 +710,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         serverAddresses = saved ?: "Internal Storage:\nhttp://0.0.0.0:8080/"
     }
 
-    private fun handleToggle(start: Boolean, onShowDialog: () -> Unit) {
+    private fun handleToggle(start: Boolean) {
         if (isPending) return
         isPending = true
 
@@ -559,7 +723,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                         } else {
-                            toggleService(true, onShowDialog)
+                            toggleService(true)
                         }
                     }
                     override fun onAdFailedToShowFullScreenContent(error: AdError) {
@@ -569,7 +733,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                         } else {
-                            toggleService(true, onShowDialog)
+                            toggleService(true)
                         }
                     }
                 }
@@ -582,7 +746,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         if (start && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {
-            toggleService(start, onShowDialog)
+            toggleService(start)
         }
     }
 
@@ -595,15 +759,9 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         }
     }
 
-    private fun toggleService(start: Boolean, onShowDialog: () -> Unit) {
+    private fun toggleService(start: Boolean) {
         if (start) {
             checkAndRequestLocation()
-            if (!isNetworkAvailable()) {
-                onShowDialog()
-                showNetworkDialog = true
-                isPending = false
-                return
-            }
         }
 
         val intent = Intent(this, WebDAVService::class.java)
@@ -624,24 +782,6 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     private fun updateAddresses() {
         if (isDiscoveryOn && serverAddresses.contains("0.0.0.0")) {
             serverAddresses = "Scanning storages..."
-        }
-    }
-
-    private fun isNetworkAvailable(): Boolean {
-        return try {
-            val interfaces = java.net.NetworkInterface.getNetworkInterfaces().toList()
-
-            interfaces.any { intf ->
-
-                intf.isUp && !intf.isLoopback && (
-                        intf.name.contains("wlan") ||
-                                intf.name.contains("ap") ||
-                                intf.name.contains("softap") ||
-                                intf.name.contains("rndis")
-                        )
-            }
-        } catch (_: Exception) {
-            false
         }
     }
 
@@ -818,7 +958,7 @@ fun DiscoveryScreen(
     isOn: Boolean,
     isPending: Boolean,
     addresses: String,
-    onToggle: (Boolean, () -> Unit) -> Unit,
+    onToggle: (Boolean) -> Unit,
     onOpenPicker: () -> Unit,
     onOpenAllowedNetworks: () -> Unit,
     onOpenBlockedNetworks: () -> Unit,
@@ -852,13 +992,6 @@ fun DiscoveryScreen(
         targetValue = if (themeExpanded) 90f else 0f,
         label = "themeArrow"
     )
-
-    LaunchedEffect(Unit) {
-        val intent = Intent(context, WebDAVService::class.java).apply {
-            action = "REFRESH_INFO"
-        }
-        context.startService(intent)
-    }
 
     val bgColor = MaterialTheme.colorScheme.background
 
@@ -920,7 +1053,7 @@ fun DiscoveryScreen(
 
                 Switch(
                     checked = isOn,
-                    onCheckedChange = { onToggle(it) { showNetworkDialog = true } },
+                    onCheckedChange = { onToggle(it) },
                     enabled = !isPending,
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = if (isDark) Color.Black else Color.White,
@@ -954,7 +1087,6 @@ fun DiscoveryScreen(
                         Text(
                             text = "Choose Shared Paths...",
                             fontSize = 16.sp,
-                            style = MaterialTheme.typography.labelMedium,
                             color = Color(0xFF2BAED5)
                         )
                     }
@@ -963,12 +1095,11 @@ fun DiscoveryScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "Shared Paths Addresses:",
+                text = "Shared Paths Addresses",
                 fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
+                fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(bottom = 8.dp),
-                color = if (isOn && networkState == NetworkState.TRUSTED) MaterialTheme.colorScheme.onSurface
-                else Color.Gray
+                color = Color.Gray
             )
             Surface(
                 tonalElevation = 4.dp,
@@ -999,6 +1130,23 @@ fun DiscoveryScreen(
                 }
 
                 when {
+                    // State 1 — service is off
+                    !isOn -> {
+                        Column(
+                            modifier = Modifier
+                                .padding(16.dp)
+                                .graphicsLayer(alpha = 0.5f)
+                        ) {
+                            Text(
+                                text = "NetworkShare is off.\nTurn on the switch to start sharing.",
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 14.sp,
+                                color = Color.Gray
+                            )
+                        }
+                    }
+
+                    // State 2 — no paths selected
                     noPaths -> {
                         Column(
                             modifier = Modifier
@@ -1014,7 +1162,12 @@ fun DiscoveryScreen(
                         }
                     }
 
-                    networkState == NetworkState.NO_NETWORK -> {
+                    // State 3 — service on, no network → also trigger dialog
+                    isOn && networkState == NetworkState.NO_NETWORK -> {
+                        LaunchedEffect(Unit) {
+                            delay(1800L)
+                            showNetworkDialog = true
+                        }
                         Column(
                             modifier = Modifier
                                 .padding(16.dp)
@@ -1029,6 +1182,7 @@ fun DiscoveryScreen(
                         }
                     }
 
+                    // State 4 — service on, trusted network
                     isOn && networkState == NetworkState.TRUSTED -> {
                         SelectionContainer {
                             LazyColumn(
@@ -1055,6 +1209,7 @@ fun DiscoveryScreen(
                         }
                     }
 
+                    // State 5 — service on, untrusted/pending
                     else -> {
                         Column(
                             modifier = Modifier
@@ -1083,9 +1238,9 @@ fun DiscoveryScreen(
             Text(
                 text = "Network Security",
                 fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
+                fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(bottom = 8.dp),
-                color = MaterialTheme.colorScheme.onSurface
+                color = Color.Gray
             )
             Surface(
                 tonalElevation = 4.dp,
@@ -1118,7 +1273,7 @@ fun DiscoveryScreen(
                                 WebDAVService.isAuthEnabled.value = it
                                 if (!it) {
                                     // Turning auth OFF → stop the service
-                                    onToggle(false) { WebDAVService.isAuthEnabled.value = true }
+                                    onToggle(false)
                                 } else {
                                     // Turning auth ON → just update the flag, don't touch the service
                                     WebDAVService.savePaths(context)
@@ -1313,9 +1468,9 @@ fun DiscoveryScreen(
             Text(
                 text = "Manage Networks",
                 fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
+                fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(bottom = 8.dp),
-                color = MaterialTheme.colorScheme.onSurface
+                color = Color.Gray
             )
             Surface(
                 tonalElevation = 4.dp,
