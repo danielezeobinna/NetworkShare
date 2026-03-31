@@ -26,6 +26,8 @@ data class FolderItem(
 
 class WebDAVService : Service(), TransferListener {
     private var currentSsid: String = ""
+    private var wakeLock: android.os.PowerManager.WakeLock? = null
+    private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
     private var networkCallback: android.net.ConnectivityManager.NetworkCallback? = null
     private val activeServers = mutableListOf<WebDAVServer>()
     private val channelId = "WebDAV_Service_Channel"
@@ -122,6 +124,33 @@ class WebDAVService : Service(), TransferListener {
             addAction(android.net.wifi.WifiManager.WIFI_STATE_CHANGED_ACTION)
         }
         registerReceiver(networkHardwareReceiver, filter)
+
+        // Acquire CPU wake lock
+        if (wakeLock == null) {
+            val pm = getSystemService(POWER_SERVICE) as android.os.PowerManager
+            wakeLock = pm.newWakeLock(
+                android.os.PowerManager.PARTIAL_WAKE_LOCK,
+                "NetworkShare::WebDAVWakeLock"
+            ).also {
+                it.setReferenceCounted(false)
+                @SuppressLint("WakelockTimeout")
+                it.acquire() // no timeout
+            }
+        }
+
+        // Acquire high-perf WiFi lock
+        if (wifiLock == null) {
+            val wm = applicationContext.getSystemService(WIFI_SERVICE)
+                    as android.net.wifi.WifiManager
+            wifiLock = wm.createWifiLock(
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+                    android.net.wifi.WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+                else
+                    @Suppress("DEPRECATION")
+                    android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF,
+                "NetworkShare::WebDAVWifiLock"
+            ).also { it.acquire() }
+        }
         startForeground(1, notification)
 
         startWebDAVServers()
@@ -516,7 +545,7 @@ class WebDAVService : Service(), TransferListener {
             networkState.value = NetworkState.TRUSTED
             if (activeServers.isNotEmpty()) {
                 NetworkTrustManager.restoreSharingNotification(this)
-                }
+            }
             Log.d(tag, "Hotspot active — always trusted")
             return
         }
@@ -604,6 +633,8 @@ class WebDAVService : Service(), TransferListener {
             } catch (_: Exception) {}
         }
         NetworkTrustManager.allowOnceNetworks.clear()  // ← add this
+        wakeLock?.let { if (it.isHeld) it.release() }
+        wifiLock?.let { if (it.isHeld) it.release() }
         super.onDestroy()
     }
 

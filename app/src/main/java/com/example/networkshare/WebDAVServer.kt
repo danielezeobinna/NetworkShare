@@ -18,8 +18,8 @@ import kotlin.text.Charsets
 // ─────────────────────────────────────────────────────────────
 private object DigestAuthManager {
     private const val REALM             = "NetworkShare"
-    private const val NONCE_VALIDITY_MS = 300_000L  // 5 minutes
-    private const val SESSION_IDLE_MS   = 10_000L   // 10 seconds idle timeout
+    private const val NONCE_VALIDITY_MS = 1_800_000L
+    private const val SESSION_IDLE_MS   = 600_000L
 
     // nonce -> creation timestamp
     private val validNonces = ConcurrentHashMap<String, Long>()
@@ -643,8 +643,187 @@ class WebDAVServer(
         val sessionKey  = "${session.remoteIpAddress}|${session.headers["user-agent"]}"
 
         return try {
-            if (target.isDirectory)
-                return newFixedLengthResponse(Response.Status.FORBIDDEN, MIME_PLAINTEXT, "Directory GET forbidden")
+            if (target.isDirectory) {
+                // Build the UNC equivalent of the HTTP URL so the user knows what to paste
+                // in Windows Explorer's address bar instead.
+                //
+                // HTTP:  http://192.168.111.27:8080/Download
+                // UNC:   \\192.168.111.27@8080\DavWWWRoot\Download
+                val host    = session.headers["host"] ?: "$boundIp:$port"  // e.g. "192.168.111.27:8080"
+                val parts   = host.split(":")
+                val ip      = parts[0]
+                val portStr = if (parts.size > 1) parts[1] else "80"
+
+                // URI path after the host, e.g. "/Download" or "/"
+                val uriPath = session.uri.trimEnd('/')
+
+                // UNC base: \\ip@port\DavWWWRoot
+                val uncBase = """\\$ip@$portStr\DavWWWRoot"""
+
+                // Append sub-path if not root, converting forward-slashes to backslashes
+                val uncSubPath = if (uriPath.isEmpty() || uriPath == "/") ""
+                else uriPath.replace('/', '\\')
+                val uncFull = "$uncBase$uncSubPath"
+
+                val html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebDAV Server</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f0f2f5;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 24px;
+    }
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.10);
+      max-width: 560px;
+      width: 100%;
+      padding: 40px 36px 32px;
+    }
+    .icon { font-size: 48px; margin-bottom: 16px; }
+    h1 {
+      font-size: 22px;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin-bottom: 10px;
+    }
+    p {
+      font-size: 15px;
+      color: #555;
+      line-height: 1.6;
+      margin-bottom: 16px;
+    }
+    .unc-box {
+      background: #f6f8fa;
+      border: 1.5px solid #d0d7de;
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin: 20px 0;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .unc-path {
+      font-family: "Cascadia Code", "Consolas", "Courier New", monospace;
+      font-size: 14px;
+      color: #0969da;
+      word-break: break-all;
+      flex: 1;
+      user-select: all;
+    }
+    .copy-btn {
+      background: #0969da;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 14px;
+      font-size: 13px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s;
+    }
+    .copy-btn:hover { background: #0753b0; }
+    .copy-btn.copied { background: #1a7f37; }
+    .steps {
+      background: #fff8e1;
+      border-left: 4px solid #f6a800;
+      border-radius: 0 8px 8px 0;
+      padding: 14px 16px;
+      margin-top: 8px;
+    }
+    .steps p { margin-bottom: 6px; color: #555; font-size: 14px; }
+    .steps p:last-child { margin-bottom: 0; }
+    .steps strong { color: #333; }
+    .footer {
+      margin-top: 28px;
+      font-size: 12px;
+      color: #aaa;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">📂</div>
+    <h1>This is a WebDAV File Server</h1>
+    <p>
+      This address is a <strong>WebDAV server</strong> running on your local network.
+      It cannot be browsed directly in a web browser &mdash; you need to open it
+      using <strong>Windows Explorer</strong> or another WebDAV-compatible client.
+    </p>
+    <p>Copy the network path below and paste it into the address bar of Windows Explorer:</p>
+    <div class="unc-box">
+      <span class="unc-path" id="uncPath">$uncFull</span>
+      <button class="copy-btn" id="copyBtn" onclick="copyPath()">Copy</button>
+    </div>
+    <div class="steps">
+      <p><strong>How to open in Windows Explorer:</strong></p>
+      <p>1. Press <strong>Win + E</strong> to open File Explorer.</p>
+      <p>2. Click the address bar at the top.</p>
+      <p>3. Paste the path above and press <strong>Enter</strong>.</p>
+      <p>4. Enter your username and password when prompted.</p>
+    </div>
+    <div class="footer">WebDAV Server &bull; Access via WebDAV client only</div>
+  </div>
+  <script>
+    function copyPath() {
+      const text = document.getElementById('uncPath').textContent;
+      const btn  = document.getElementById('copyBtn');
+
+      function onSuccess() {
+        btn.textContent = 'Copied!';
+        btn.classList.add('copied');
+        setTimeout(function() {
+          btn.textContent = 'Copy';
+          btn.classList.remove('copied');
+        }, 2000);
+      }
+
+      // Modern API works on HTTPS; falls back to execCommand on plain HTTP
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(onSuccess).catch(fallback);
+      } else {
+        fallback();
+      }
+
+      function fallback() {
+        // Create a temporary textarea, select its content, copy, then remove it
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none;';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        try {
+          document.execCommand('copy');
+          onSuccess();
+        } catch(e) {
+          // Last resort: select the visible text so the user can Ctrl+C manually
+          const range = document.createRange();
+          range.selectNode(document.getElementById('uncPath'));
+          window.getSelection().removeAllRanges();
+          window.getSelection().addRange(range);
+          btn.textContent = 'Press Ctrl+C';
+          setTimeout(function() { btn.textContent = 'Copy'; }, 3000);
+        }
+        document.body.removeChild(ta);
+      }
+    }
+  </script>
+</body>
+</html>"""
+                return newFixedLengthResponse(Response.Status.FORBIDDEN, "text/html; charset=utf-8", html)
+            }
 
             var startOffset = 0L
             var endOffset   = fileLength - 1

@@ -114,8 +114,8 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     private var lastUnlockedTime = 0L
     private val cooldownMs = 25_000L
     private var isValidNetwork by mutableStateOf(true)
-    private var serverAddresses by mutableStateOf("Internal Storage:\nhttp://0.0.0.0:8080/")
-    private var isDiscoveryOn by mutableStateOf(false)
+    private var serverAddresses by mutableStateOf("")
+    private var isDiscoveryOn by mutableStateOf(false)  // will be set in onCreate
     private var isPending by mutableStateOf(false)
     private var showUnknownNetworkDialog by mutableStateOf(false)
     private var interstitialAd: InterstitialAd? = null
@@ -167,18 +167,31 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         return storages
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putLong("lastUnlockedTime", lastUnlockedTime)
+        outState.putBoolean("isUnlocked", isUnlocked)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        if (savedInstanceState != null) {
+            lastUnlockedTime = savedInstanceState.getLong("lastUnlockedTime", 0L)
+            isUnlocked = savedInstanceState.getBoolean("isUnlocked", false)
+        }
+
+        isPending = false
+        isDiscoveryOn = isServiceRunning()
+        if (savedInstanceState == null) {
+            WebDAVService.loadPaths(this)
+            handleIncomingShare(intent)
+            loadAddresses()
+            showBiometricPrompt()
+        }
+
         MobileAds.initialize(this) {}
         loadInterstitialAd()
-        WebDAVService.loadPaths(this)
-        handleIncomingShare(intent)
-        loadAddresses()
-
-        isDiscoveryOn = isServiceRunning()
-        showBiometricPrompt()
-        if (isDiscoveryOn) updateAddresses()
 
         val savedTheme = getPreferences(MODE_PRIVATE).getString("app_theme", "SYSTEM")
         appTheme = AppTheme.valueOf(savedTheme ?: "SYSTEM")
@@ -644,24 +657,34 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 
     override fun onStop() {
         super.onStop()
-        val now = System.currentTimeMillis()
-        if (now - lastUnlockedTime >= cooldownMs) {
-            isUnlocked = false
-        }
         try { unregisterReceiver(receiver) } catch (_: Exception) {}
     }
 
     override fun onResume() {
         super.onResume()
-        val running = isServiceRunning()
-        isDiscoveryOn = running
+        isDiscoveryOn = isServiceRunning()
 
-        if (!isUnlocked) {
-            showBiometricPrompt()
-            return
+        val now = System.currentTimeMillis()
+        val km = getSystemService(KEYGUARD_SERVICE) as KeyguardManager
+
+        // If device is locked, always require auth regardless of cooldown
+        when {
+            // Device is actually locked (screen was off/locked) — always require auth
+            km.isDeviceLocked && !isUnlocked -> {
+                showBiometricPrompt()
+                return
+            }
+
+            // Cooldown expired — require auth
+            now - lastUnlockedTime >= cooldownMs -> {
+                isUnlocked = false
+                showBiometricPrompt()
+                return
+            }
         }
 
-        if (running) {
+        // Genuinely unlocked and within cooldown
+        if (isDiscoveryOn) {
             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                 val intent = Intent(this, WebDAVService::class.java).apply {
                     action = "REFRESH_INFO"
@@ -682,8 +705,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     }
 
     private fun saveAddresses(addresses: String) {
-        val sharedPref = getPreferences(MODE_PRIVATE)
-        sharedPref.edit(commit = false) {
+        getPreferences(MODE_PRIVATE).edit {
             putString("last_addresses", addresses)
         }
     }
@@ -705,9 +727,8 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     }
 
     private fun loadAddresses() {
-        val sharedPref = getPreferences(MODE_PRIVATE)
-        val saved = sharedPref.getString("last_addresses", "Internal Storage:\nhttp://0.0.0.0:8080/")
-        serverAddresses = saved ?: "Internal Storage:\nhttp://0.0.0.0:8080/"
+        serverAddresses = getPreferences(MODE_PRIVATE)
+            .getString("last_addresses", "") ?: ""
     }
 
     private fun handleToggle(start: Boolean) {
@@ -769,19 +790,12 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
             if (start) {
                 startForegroundService(intent)
                 isDiscoveryOn = true
-                updateAddresses()
             } else {
                 stopService(intent)
                 isDiscoveryOn = false
             }
         } finally {
             window.decorView.postDelayed({ isPending = false }, 500)
-        }
-    }
-
-    private fun updateAddresses() {
-        if (isDiscoveryOn && serverAddresses.contains("0.0.0.0")) {
-            serverAddresses = "Scanning storages..."
         }
     }
 
@@ -1165,7 +1179,7 @@ fun DiscoveryScreen(
                     // State 3 — service on, no network → also trigger dialog
                     isOn && networkState == NetworkState.NO_NETWORK -> {
                         LaunchedEffect(Unit) {
-                            delay(1800L)
+                            delay(2000L)
                             showNetworkDialog = true
                         }
                         Column(
@@ -2139,6 +2153,7 @@ fun BiometricGateScreen(onUnlockClick: () -> Unit) {
         modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding()
+            .verticalScroll(rememberScrollState())
             .padding(24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
@@ -2146,7 +2161,9 @@ fun BiometricGateScreen(onUnlockClick: () -> Unit) {
         Surface(
             tonalElevation = 4.dp,
             shape = MaterialTheme.shapes.medium,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .widthIn(max = 360.dp) // Prevents it from getting too wide in landscape
+                .fillMaxWidth(), // Tells it to fill up to that 400.dp limit
             color = MaterialTheme.colorScheme.surfaceVariant
         ) {
             Column(
@@ -2179,10 +2196,10 @@ fun BiometricGateScreen(onUnlockClick: () -> Unit) {
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color(0xFF2BAED5)
                     ),
-                    modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
                         text = "Verify to Unlock",
+                        modifier = Modifier.padding(horizontal = 8.dp), // Space inside the button
                         color = if (isDark) Color.Black else Color.White
                     )
                 }
