@@ -82,6 +82,13 @@ class WebDAVService : Service(), TransferListener {
             return START_STICKY
         }
 
+        if (intent?.action == "RESTART_SERVERS") {
+            // Full server restart — used by pull-to-refresh
+            isStartingServers = false  // reset guard in case a previous call was stuck
+            startWebDAVServers()
+            return START_STICKY
+        }
+
         createNotificationChannel()
         NetworkTrustManager.ensureChannel(      // ← add this
             getSystemService(NotificationManager::class.java)
@@ -239,7 +246,15 @@ class WebDAVService : Service(), TransferListener {
         return String.format("%.2f %s", size, units[unitIndex])
     }
 
+    private var isStartingServers = false
+
     private fun startWebDAVServers() {
+        if (isStartingServers) {
+            Log.d(tag, "startWebDAVServers() already in progress — skipping duplicate call")
+            return
+        }
+        isStartingServers = true
+
         activeServers.forEach { it.stopServer() }
         activeServers.clear()
 
@@ -298,6 +313,7 @@ class WebDAVService : Service(), TransferListener {
             }
         }
 
+        isStartingServers = false
         broadcastCurrentAddresses()
     }
 
@@ -673,7 +689,7 @@ class WebDAVService : Service(), TransferListener {
     companion object {
         var isRunning = false
         var networkState = mutableStateOf(NetworkState.NO_NETWORK)
-        var isAuthEnabled = mutableStateOf(true)
+        var isAuthEnabled = mutableStateOf(false)  // always overwritten by loadPaths()
         var isNetworkTrusted = mutableStateOf(false)
         var pendingTrustSsid = mutableStateOf<String?>(null)
         var username = mutableStateOf("user")
