@@ -1,6 +1,7 @@
 package com.example.networkshare
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -113,11 +114,13 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     private var isUnlocked by mutableStateOf(false)
     private var lastUnlockedTime = 0L
     private val cooldownMs = 25_000L
+    private var isShowingAd = false
     private var isValidNetwork by mutableStateOf(true)
     private var serverAddresses by mutableStateOf("")
     private var isDiscoveryOn by mutableStateOf(false)  // will be set in onCreate
     private var isPending by mutableStateOf(false)
     private var showUnknownNetworkDialog by mutableStateOf(false)
+    private var showNotificationDialog by mutableStateOf(false)
     private var interstitialAd: InterstitialAd? = null
     private var appTheme by mutableStateOf(AppTheme.SYSTEM)
 
@@ -132,6 +135,9 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
             when (intent?.action) {
                 "com.example.networkshare.SERVER_STOPPED" -> {
                     isDiscoveryOn = false
+                }
+                "com.example.networkshare.CHECK_LOCATION" -> {
+                    checkLocationForUntrustedNetwork()
                 }
                 "com.example.networkshare.ADDRESSES_UPDATED" -> {
                     val data = intent.getStringExtra("address_list")
@@ -173,6 +179,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         outState.putBoolean("isUnlocked", isUnlocked)
     }
 
+    @SuppressLint("ObsoleteSdkInt")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -183,8 +190,8 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 
         isPending = false
         isDiscoveryOn = isServiceRunning()
+        WebDAVService.loadPaths(this)  // always restore saved state
         if (savedInstanceState == null) {
-            WebDAVService.loadPaths(this)
             handleIncomingShare(intent)
             loadAddresses()
             showBiometricPrompt()
@@ -407,6 +414,100 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                                 }
                                             }
 
+                                            if (showNotificationDialog) {
+                                                val isDark = when (appTheme) {
+                                                    AppTheme.LIGHT -> false
+                                                    AppTheme.DARK -> true
+                                                    AppTheme.SYSTEM -> isSystemInDarkTheme()
+                                                }
+                                                Dialog(
+                                                    onDismissRequest = { showNotificationDialog = false },
+                                                    properties = DialogProperties(
+                                                        usePlatformDefaultWidth = false,
+                                                        dismissOnBackPress = true,
+                                                        dismissOnClickOutside = true
+                                                    )
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .fillMaxSize(0.98f)
+                                                            .clickable(
+                                                                interactionSource = remember { MutableInteractionSource() },
+                                                                indication = null
+                                                            ) { showNotificationDialog = false },
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        Surface(
+                                                            modifier = Modifier
+                                                                .offset(y = (-24).dp)
+                                                                .fillMaxWidth(0.95f)
+                                                                .padding(horizontal = 4.dp),
+                                                            shape = RoundedCornerShape(28.dp),
+                                                            color = if (isDark) Color(0xFF252525) else Color(0xFFFCFCFC),
+                                                            tonalElevation = 6.dp
+                                                        ) {
+                                                            Column(
+                                                                modifier = Modifier.padding(24.dp),
+                                                                horizontalAlignment = Alignment.Start
+                                                            ) {
+                                                                Text(
+                                                                    text = "Notifications Required",
+                                                                    fontWeight = FontWeight.Bold,
+                                                                    fontSize = 20.sp,
+                                                                    color = MaterialTheme.colorScheme.onSurface
+                                                                )
+
+                                                                Spacer(modifier = Modifier.height(16.dp))
+
+                                                                Text(
+                                                                    text = "Android requires notifications to be enabled for NetworkShare to run. Please enable notifications for this app in Settings.",
+                                                                    fontSize = 16.sp,
+                                                                    color = MaterialTheme.colorScheme.onSurface
+                                                                )
+
+                                                                Spacer(modifier = Modifier.height(24.dp))
+
+                                                                HorizontalDivider(
+                                                                    modifier = Modifier.padding(
+                                                                        horizontal = 8.dp
+                                                                    ),
+                                                                    thickness = 0.5.dp,
+                                                                    color = Color.Gray.copy(
+                                                                        alpha = 0.2f
+                                                                    )
+                                                                )
+
+                                                                Row(
+                                                                    modifier = Modifier.fillMaxWidth(),
+                                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                                    verticalAlignment = Alignment.CenterVertically
+                                                                ) {
+                                                                    TextButton(
+                                                                        onClick = {
+                                                                            showNotificationDialog = false
+                                                                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                                                                val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                                                                    putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                                                                                }
+                                                                                startActivity(intent)
+                                                                            }
+                                                                        },
+                                                                        modifier = Modifier
+                                                                            .weight(1f)
+                                                                            // We use clickable here to force the custom ripple color
+                                                                            .clickable(
+                                                                                interactionSource = remember { MutableInteractionSource() },
+                                                                                onClick = { /* This is handled by the TextButton's onClick */ }
+                                                                            )
+                                                                    ) {
+                                                                        Text("Open Settings", color = Color(0xFF2BAED5), fontSize = 16.sp)
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
                                             when {
                                                 showUserGuide.value -> UserGuideScreen(
                                                     onBack = { showUserGuide.value = false }
@@ -628,17 +729,8 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                 isUnlocked = true
                 lastUnlockedTime = System.currentTimeMillis()
                 initPermissions()
-            } else if (resultCode == RESULT_CANCELED) {
-                // On some devices RESULT_CANCELED is returned even on success
-                // so we check keyguard state instead of trusting resultCode
-                val km = getSystemService(KEYGUARD_SERVICE) as KeyguardManager
-                if (!km.isDeviceLocked) {
-                    isUnlocked = true
-                    lastUnlockedTime = System.currentTimeMillis()
-                    initPermissions()
-                } else {
-                    Toast.makeText(this, "Authentication failed", Toast.LENGTH_SHORT).show()
-                }
+            } else {
+                // User cancelled or failed — stay on gate screen, do nothing
             }
         }
     }
@@ -648,6 +740,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         val filter = IntentFilter().apply {
             addAction("com.example.networkshare.SERVER_STOPPED")
             addAction("com.example.networkshare.ADDRESSES_UPDATED")
+            addAction("com.example.networkshare.CHECK_LOCATION")
         }
         val listenFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             RECEIVER_NOT_EXPORTED
@@ -663,6 +756,23 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     override fun onResume() {
         super.onResume()
         isDiscoveryOn = isServiceRunning()
+
+        // Returning from interstitial ad — skip auth re-check
+        if (isShowingAd) {
+            isShowingAd = false
+            // still do the refresh and pending dialog below
+            if (isDiscoveryOn) {
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    val intent = Intent(this, WebDAVService::class.java).apply {
+                        action = "REFRESH_INFO"
+                    }
+                    startService(intent)
+                }, 1500)
+            }
+            val pending = WebDAVService.pendingTrustSsid.value
+            if (pending != null && isDiscoveryOn) showUnknownNetworkDialog = true
+            return
+        }
 
         val now = System.currentTimeMillis()
         val km = getSystemService(KEYGUARD_SERVICE) as KeyguardManager
@@ -728,10 +838,18 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 
     private fun loadAddresses() {
         serverAddresses = getPreferences(MODE_PRIVATE)
-            .getString("last_addresses", "") ?: ""
+            .getString("last_addresses", "loading...") ?: ""
     }
 
     private fun handleToggle(start: Boolean) {
+        if (start) {
+            val notifManager = getSystemService(android.app.NotificationManager::class.java)
+            if (!notifManager.areNotificationsEnabled()) {
+                showNotificationDialog = true
+                return
+            }
+        }
+
         if (isPending) return
         isPending = true
 
@@ -758,6 +876,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                         }
                     }
                 }
+                isShowingAd = true
                 ad.show(this)
                 return
             }
@@ -772,19 +891,10 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     }
 
     private fun isServiceRunning(): Boolean {
-        return try {
-            val manager = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
-            manager.activeNotifications.any { it.id == 1 }
-        } catch (_: Exception) {
-            false
-        }
+        return WebDAVService.isRunning
     }
 
     private fun toggleService(start: Boolean) {
-        if (start) {
-            checkAndRequestLocation()
-        }
-
         val intent = Intent(this, WebDAVService::class.java)
         try {
             if (start) {
@@ -801,13 +911,22 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 
     private fun initPermissions() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // Android 11+ — MANAGE_EXTERNAL_STORAGE opens system settings page
             if (!Environment.isExternalStorageManager()) {
                 val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
                     data = "package:${applicationContext.packageName}".toUri()
                 }
+                // Unlock optimistically — settings page has no callback.
+                // onResume() re-checks storage state when user returns.
+                isUnlocked = true
                 startActivity(intent)
+            } else {
+                // Already granted — unlock now
+                isUnlocked = true
             }
         } else {
+            // Android 10 and below — request READ/WRITE at runtime.
+            // isUnlocked is only set in onRequestPermissionsResult after granted.
             val permissions = arrayOf(
                 Manifest.permission.READ_EXTERNAL_STORAGE,
                 Manifest.permission.WRITE_EXTERNAL_STORAGE
@@ -816,7 +935,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         }
     }
 
-    fun checkAndRequestLocation() {
+    fun hasLocationPermission(): Boolean {
         val fineGranted = ContextCompat.checkSelfPermission(
             this, Manifest.permission.ACCESS_FINE_LOCATION
         ) == android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -825,8 +944,10 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
             this, Manifest.permission.ACCESS_COARSE_LOCATION
         ) == android.content.pm.PackageManager.PERMISSION_GRANTED
 
-        if (fineGranted || coarseGranted) return
+        return fineGranted || coarseGranted
+    }
 
+    fun requestLocationPermissions() {
         androidx.core.app.ActivityCompat.requestPermissions(
             this,
             arrayOf(
@@ -835,6 +956,13 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
             ),
             101
         )
+    }
+
+    fun checkLocationForUntrustedNetwork() {
+        if (!hasLocationPermission()) {
+            toggleService(false)
+            requestLocationPermissions()
+        }
     }
 
     override fun onRequestPermissionsResult(
@@ -849,6 +977,13 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
             if (!granted) {
                 stopService(Intent(this, WebDAVService::class.java))
                 isDiscoveryOn = false
+            }
+            if (granted) {
+                // Storage confirmed — unlock and show discovery screen
+                isUnlocked = true
+            } else {
+                // Stay locked — storage is required
+                Toast.makeText(this, "Storage permission is required to use NetworkShare", Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -1146,6 +1281,7 @@ fun DiscoveryScreen(
                 when {
                     // State 1 — service is off
                     !isOn -> {
+                        showNetworkDialog = false
                         Column(
                             modifier = Modifier
                                 .padding(16.dp)
@@ -1162,6 +1298,7 @@ fun DiscoveryScreen(
 
                     // State 2 — no paths selected
                     noPaths -> {
+                        showNetworkDialog = false
                         Column(
                             modifier = Modifier
                                 .padding(16.dp)
@@ -1198,6 +1335,7 @@ fun DiscoveryScreen(
 
                     // State 4 — service on, trusted network
                     isOn && networkState == NetworkState.TRUSTED -> {
+                        showNetworkDialog = false
                         SelectionContainer {
                             LazyColumn(
                                 state = listState,
@@ -1225,6 +1363,7 @@ fun DiscoveryScreen(
 
                     // State 5 — service on, untrusted/pending
                     else -> {
+                        showNetworkDialog = false
                         Column(
                             modifier = Modifier
                                 .padding(16.dp)

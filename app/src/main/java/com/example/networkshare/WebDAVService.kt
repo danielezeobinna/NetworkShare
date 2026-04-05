@@ -68,6 +68,7 @@ class WebDAVService : Service(), TransferListener {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        isRunning = true
         if (intent?.action == "STOP_SERVICE") {
             stopSelf()
             return START_NOT_STICKY
@@ -362,6 +363,7 @@ class WebDAVService : Service(), TransferListener {
         val intent = Intent("com.example.networkshare.ADDRESSES_UPDATED")
         intent.putExtra("address_list", statusSummary.toString().trim().ifEmpty { "No folders selected." })
         intent.putExtra("is_valid_network", isValidNetwork)
+        intent.setPackage(packageName)
         sendBroadcast(intent)
     }
 
@@ -571,6 +573,9 @@ class WebDAVService : Service(), TransferListener {
 
         when {
             ssid.isBlank() || ssid == "<unknown ssid>" -> {
+                val locationIntent = Intent("com.example.networkshare.CHECK_LOCATION")
+                locationIntent.setPackage(packageName)
+                sendBroadcast(locationIntent)
                 isNetworkTrusted.value = false
                 networkState.value = NetworkState.NO_NETWORK
                 if (activeServers.isNotEmpty()) {
@@ -616,6 +621,7 @@ class WebDAVService : Service(), TransferListener {
 
 
     override fun onDestroy() {
+        isRunning = false
         Log.d(tag, "Service stopping, cleaning up servers...")
         try {
             unregisterReceiver(networkHardwareReceiver)
@@ -624,7 +630,9 @@ class WebDAVService : Service(), TransferListener {
         }
         activeServers.forEach { it.stopServer() }
         activeServers.clear()
-        sendBroadcast(Intent("com.example.networkshare.SERVER_STOPPED"))
+        val stopIntent = Intent("com.example.networkshare.SERVER_STOPPED")
+        stopIntent.setPackage(packageName)
+        sendBroadcast(stopIntent)
         networkCallback?.let {
             try {
                 val cm = getSystemService(CONNECTIVITY_SERVICE)
@@ -663,6 +671,7 @@ class WebDAVService : Service(), TransferListener {
     }
 
     companion object {
+        var isRunning = false
         var networkState = mutableStateOf(NetworkState.NO_NETWORK)
         var isAuthEnabled = mutableStateOf(true)
         var isNetworkTrusted = mutableStateOf(false)
@@ -703,9 +712,26 @@ class WebDAVService : Service(), TransferListener {
             isAuthEnabled.value = prefs.getBoolean("auth_enabled", true)
             username.value = prefs.getString("username", "user") ?: "user"
             password.value = prefs.getString("password", "pass") ?: "pass"
-            val saved = prefs.getStringSet("shared_paths", emptySet())
+            val saved = prefs.getStringSet("shared_paths", null)
             selectedPaths.clear()
-            selectedPaths.addAll(saved ?: emptySet())
+            if (saved != null) {
+                // Previously saved selection — restore it as-is (even if empty)
+                selectedPaths.addAll(saved)
+            } else {
+                // First install: seed default internal-storage folders
+                val internalRoot = android.os.Environment.getExternalStorageDirectory()
+                val defaultFolderNames = listOf(
+                    "DCIM", "Documents", "Download",
+                    "Movies", "Music", "NetworkShare", "Pictures"
+                )
+                val defaults = defaultFolderNames
+                    .map { File(internalRoot, it) }
+                    .filter { it.exists() && it.isDirectory }
+                    .map { it.absolutePath }
+                selectedPaths.addAll(defaults)
+                // Persist so subsequent launches restore the user's own choices
+                savePaths(context)
+            }
         }
 
         fun toggleSelection(context: Context, path: String) {
