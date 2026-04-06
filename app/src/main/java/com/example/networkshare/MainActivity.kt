@@ -504,7 +504,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                                                                 onClick = { /* This is handled by the TextButton's onClick */ }
                                                                             )
                                                                     ) {
-                                                                        Text("Open Settings", color = Color(0xFF2BAED5), fontSize = 16.sp)
+                                                                        Text("Open Settings", color = Color(0xFF2BAED5), fontSize = 18.sp)
                                                                     }
                                                                 }
                                                             }
@@ -2111,8 +2111,10 @@ fun FilePickerSection(onBack: () -> Unit) {
                     modifier = Modifier
                         .size(26.dp)
                         .clickable {
-                            currentPath = null
-                            WebDAVService.scannedItems.clear()
+                            if (currentPath != null) {
+                                currentPath = null
+                                WebDAVService.scannedItems.clear()
+                            }
                         }
                 )
 
@@ -2132,9 +2134,9 @@ fun FilePickerSection(onBack: () -> Unit) {
                             else -> file.name
                         }
 
-                        // Skip showing segments like "storage" or "emulated"
+                        // Skip showing segments like "/", "storage" or "emulated"
                         // only if they are just parents of the actual storage roots
-                        if (file.path != "/storage" && file.path != "/storage/emulated") {
+                        if (file.path != "/" && file.path != "/storage" && file.path != "/storage/emulated") {
                             Icon(
                                 painter = painterResource(id = R.drawable.baseline_chevron_right),
                                 contentDescription = null,
@@ -2175,6 +2177,7 @@ fun FilePickerSection(onBack: () -> Unit) {
                 items(itemsToShow, key = { it.file.absolutePath }) { folderItem ->
 
                     val isStorageRoot = currentPath == null
+                    val isLast = folderItem == itemsToShow.last()
 
                     val label = remember(folderItem, currentPath) {
                         if (isStorageRoot && folderItem.file.absolutePath.contains("emulated/0")) {
@@ -2190,6 +2193,7 @@ fun FilePickerSection(onBack: () -> Unit) {
                         name = label,
                         path = if (currentPath == null) folderItem.file.absolutePath else "Folder",
                         fullPath = folderItem.file.absolutePath,
+                        isLast = isLast,
                         onClick = {
                             if (folderItem.hasSubFolders || isStorageRoot) {
                                 currentPath = folderItem.file
@@ -2209,6 +2213,7 @@ fun StorageRow(
     name: String,
     path: String,
     fullPath: String,
+    isLast: Boolean = false,
     onClick: () -> Unit
 ) {
     val isDark = LocalDarkTheme.current
@@ -2246,6 +2251,7 @@ fun StorageRow(
             ),
             contentDescription = null,
             modifier = Modifier
+                .size(40.dp)
                 .padding(end = 16.dp)
                 .offset(y = (-4).dp)
         )
@@ -2262,13 +2268,15 @@ fun StorageRow(
                 color = if (isInherited) Color.Gray else MaterialTheme.colorScheme.onSurface,
                 fontSize = 16.sp
             )
-            HorizontalDivider(
-                modifier = Modifier
-                    .offset(y = (4).dp)
-                    .padding(top = 8.dp),
-                thickness = 0.5.dp,
-                color = Color.Gray.copy(alpha = 0.3f)
-            )
+            if (!isLast) {
+                HorizontalDivider(
+                    modifier = Modifier
+                        .offset(y = (4).dp)
+                        .padding(top = 8.dp),
+                    thickness = 0.5.dp,
+                    color = Color.Gray.copy(alpha = 0.3f)
+                )
+            }
         }
 
         Box(
@@ -2470,6 +2478,7 @@ fun NetworkListScreen(
                             NetworkRow(
                                 ssid = ssid,
                                 iconRes = iconRes,
+                                isLast = ssid == networks.last(),
                                 onRemove = { onRemove(ssid) }
                             )
                         }
@@ -2484,6 +2493,7 @@ fun NetworkListScreen(
 fun NetworkRow(
     ssid: String,
     iconRes: Int,
+    isLast: Boolean = false,
     onRemove: () -> Unit
 ) {
     Row(
@@ -2513,13 +2523,15 @@ fun NetworkRow(
                 color = MaterialTheme.colorScheme.onSurface,
                 fontSize = 16.sp
             )
-            HorizontalDivider(
-                modifier = Modifier
-                    .offset(y = 4.dp)
-                    .padding(top = 8.dp),
-                thickness = 0.5.dp,
-                color = Color.Gray.copy(alpha = 0.3f)
-            )
+            if (!isLast) {
+                HorizontalDivider(
+                    modifier = Modifier
+                        .offset(y = 4.dp)
+                        .padding(top = 8.dp),
+                    thickness = 0.5.dp,
+                    color = Color.Gray.copy(alpha = 0.3f)
+                )
+            }
         }
 
         IconButton(
