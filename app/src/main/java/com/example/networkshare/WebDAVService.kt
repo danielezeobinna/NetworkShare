@@ -711,7 +711,6 @@ class WebDAVService : Service(), TransferListener {
         var isScanning = mutableStateOf(false)
         var selectedPaths = mutableStateListOf<String>()
         var tempPriorityPath: String? = null
-        val activeServers = mutableListOf<WebDAVServer>()
 
         fun savePaths(context: Context) {
             val prefs = context.getSharedPreferences("network_share_prefs", MODE_PRIVATE)

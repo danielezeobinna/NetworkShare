@@ -216,6 +216,10 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                 }
 
                 val showUserGuide = remember { mutableStateOf(false) }
+                val isPickerOpen = remember { mutableStateOf(false) }
+                val showAllowedNetworks = remember { mutableStateOf(false) }
+                val showBlockedNetworks = remember { mutableStateOf(false) }
+                val currentPickerPath = remember { mutableStateOf<File?>(null) }
 
                 val view = LocalView.current
                 if (!view.isInEditMode) {
@@ -246,12 +250,6 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                 else -> {
                                     Column(modifier = Modifier.fillMaxSize()) {
                                         Box(modifier = Modifier.weight(1f)) {
-                                            val isPickerOpen = remember { mutableStateOf(false) }
-                                            val showAllowedNetworks =
-                                                remember { mutableStateOf(false) }  // ← add
-                                            val showBlockedNetworks =
-                                                remember { mutableStateOf(false) }  // ← add
-
                                             val pendingTrustSsid = WebDAVService.pendingTrustSsid.value
 
                                             LaunchedEffect(pendingTrustSsid) {
@@ -580,9 +578,10 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                                     },
                                                 )
 
-                                                else -> FilePickerSection(onBack = {
-                                                    isPickerOpen.value = false
-                                                })
+                                                else -> FilePickerSection(
+                                                    onBack = { isPickerOpen.value = false },
+                                                    currentPath = currentPickerPath
+                                                )
                                             }
                                         }
 
@@ -2002,19 +2001,23 @@ fun DiscoveryScreen(
     } // end outer Box
 } // end DiscoveryScreen
 
-
 @Composable
-fun FilePickerSection(onBack: () -> Unit) {
+fun FilePickerSection(
+    onBack: () -> Unit,
+    currentPath: MutableState<File?>
+) {
     val context = LocalContext.current
     val activity = context as MainActivity
-    var currentPath by remember { mutableStateOf<File?>(null) }
+    var currentPath by currentPath
 
     val handleBack = {
         if (currentPath == null) {
-            val intent = Intent(context, WebDAVService::class.java).apply {
-                action = "REFRESH_INFO"
+            if (WebDAVService.isRunning) {
+                val intent = Intent(context, WebDAVService::class.java).apply {
+                    action = "REFRESH_INFO"
+                }
+                context.startService(intent)  // not startForegroundService
             }
-            context.startService(intent)
             onBack()
         } else {
             val storages = activity.getAvailableStorages()
@@ -2242,7 +2245,7 @@ fun StorageRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(vertical = 12.dp),
+            .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Image(
@@ -2253,7 +2256,6 @@ fun StorageRow(
             modifier = Modifier
                 .size(40.dp)
                 .padding(end = 16.dp)
-                .offset(y = (-4).dp)
         )
 
         Spacer(modifier = Modifier.width(16.dp))
@@ -2265,13 +2267,14 @@ fun StorageRow(
         ) {
             Text(
                 text = name,
+                modifier = Modifier.offset(y = (4).dp),
                 color = if (isInherited) Color.Gray else MaterialTheme.colorScheme.onSurface,
                 fontSize = 16.sp
             )
             if (!isLast) {
                 HorizontalDivider(
                     modifier = Modifier
-                        .offset(y = (4).dp)
+                        .offset(y = (16).dp)
                         .padding(top = 8.dp),
                     thickness = 0.5.dp,
                     color = Color.Gray.copy(alpha = 0.3f)
@@ -2284,7 +2287,6 @@ fun StorageRow(
             modifier = Modifier
                 .size(28.dp)
                 .padding(4.dp)
-                .offset(y = (-4).dp)
                 .border(
                     2.dp,
                     if (isInherited) inheritedColor
@@ -2300,11 +2302,11 @@ fun StorageRow(
                     if (!isInherited) {
                         WebDAVService.toggleSelection(context, fullPath)
 
-                        if (WebDAVService.activeServers.isNotEmpty()) {
+                        if (WebDAVService.isRunning) {
                             val intent = Intent(context, WebDAVService::class.java).apply {
-                                action = "START_SERVERS"
+                                action = "REFRESH_INFO"
                             }
-                            context.startForegroundService(intent)
+                            context.startService(intent)  // not startForegroundService
                         }
                     }
                 }
