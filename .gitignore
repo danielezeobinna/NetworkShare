@@ -13,3 +13,21 @@
 .externalNativeBuild
 .cxx
 local.properties
+hs_err_pid*.log
+replay_pid*.log
+.kotlin
+
+# Google Services (contains sensitive config)
+google-services.json
+
+# Keystore files (never commit these)
+*.jks
+*.keystore
+
+# Generated signed APK/AAB output folders
+/app/release
+*.apk
+*.aab
+
+# Idea project files
+/.idea/
