@@ -616,6 +616,11 @@ class WebDAVService : Service(), TransferListener {
             else -> {
                 isNetworkTrusted.value = false
                 networkState.value = NetworkState.UNTRUSTED
+                if (NetworkTrustManager.getTrust(ssid) == NetworkTrustManager.Trust.BLOCKED) {
+                    NetworkTrustManager.showBlockedNetworkNotification(this)
+                } else if (activeServers.isNotEmpty()) {
+                    NetworkTrustManager.showNoNetworkNotification(this)
+                }
             }
         }
     }

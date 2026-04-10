@@ -160,6 +160,40 @@ object NetworkTrustManager {
         manager?.notify(1, notification)
     }
 
+    fun showBlockedNetworkNotification(context: Context) {
+        val manager = context.getSystemService(NotificationManager::class.java)
+
+        val contentIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        val contentPendingIntent = PendingIntent.getActivity(
+            context, 1, contentIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val stopIntent = Intent(context, WebDAVService::class.java).apply {
+            action = "STOP_SERVICE"
+        }
+        val stopPendingIntent = PendingIntent.getService(
+            context, 0, stopIntent,
+            PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(context, "WebDAV_Service_Channel")
+            .setSmallIcon(R.drawable.ic_stat_name)
+            .setColor(android.graphics.Color.GRAY)
+            .setContentTitle("Network sharing is turned on")
+            .setContentText("This is a blocked network. Allow this network or connect to a trusted network to start sharing.")
+            .setOngoing(true)
+            .setSilent(true)
+            .setShowWhen(false)
+            .setContentIntent(contentPendingIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "TURN OFF", stopPendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+
+        manager?.notify(1, notification)
+    }
     // ADD this new function right after showTrustNotification:
     fun restoreSharingNotification(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java)

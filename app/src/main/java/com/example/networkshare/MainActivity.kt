@@ -198,7 +198,6 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         if (savedInstanceState == null) {
             handleIncomingShare(intent)
             loadAddresses()
-            showBiometricPrompt()
         }
 
         MobileAds.initialize(this) {}
@@ -340,16 +339,6 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                                                             )
                                                                         }
 
-                                                                        HorizontalDivider(
-                                                                            modifier = Modifier.padding(
-                                                                                horizontal = 8.dp
-                                                                            ),
-                                                                            thickness = 0.5.dp,
-                                                                            color = Color.Gray.copy(
-                                                                                alpha = 0.2f
-                                                                            )
-                                                                        )
-
                                                                         TextButton(
                                                                             onClick = {
                                                                                 NetworkTrustManager.allowOnce(
@@ -373,16 +362,6 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                                                                 fontSize = 16.sp
                                                                             )
                                                                         }
-
-                                                                        HorizontalDivider(
-                                                                            modifier = Modifier.padding(
-                                                                                horizontal = 8.dp
-                                                                            ),
-                                                                            thickness = 0.5.dp,
-                                                                            color = Color.Gray.copy(
-                                                                                alpha = 0.2f
-                                                                            )
-                                                                        )
 
                                                                         TextButton(
                                                                             onClick = {
@@ -786,22 +765,9 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         }
 
         val now = System.currentTimeMillis()
-        val km = getSystemService(KEYGUARD_SERVICE) as KeyguardManager
-
-        // If device is locked, always require auth regardless of cooldown
-        when {
-            // Device is actually locked (screen was off/locked) — always require auth
-            km.isDeviceLocked && !isUnlocked -> {
-                showBiometricPrompt()
-                return
-            }
-
-            // Cooldown expired — require auth
-            now - lastUnlockedTime >= cooldownMs -> {
-                isUnlocked = false
-                showBiometricPrompt()
-                return
-            }
+        if (now - lastUnlockedTime >= cooldownMs) {
+            isUnlocked = false
+            return
         }
 
         // Genuinely unlocked and within cooldown
@@ -2267,7 +2233,7 @@ fun StorageRow(
         ) {
             Text(
                 text = name,
-                modifier = Modifier.offset(y = (4).dp),
+                modifier = Modifier.offset(y = if (isLast) 0.dp else 4.dp),
                 color = if (isInherited) Color.Gray else MaterialTheme.colorScheme.onSurface,
                 fontSize = 16.sp
             )
@@ -2336,7 +2302,13 @@ fun StorageRow(
 @Composable
 fun BiometricGateScreen(onUnlockClick: () -> Unit) {
     val isDark = LocalDarkTheme.current
-    LaunchedEffect(Unit) { onUnlockClick() }
+    var buttonReady by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(100)
+        buttonReady = true
+        delay(1000)
+        onUnlockClick()
+    }
 
     Column(
         modifier = Modifier
@@ -2382,12 +2354,14 @@ fun BiometricGateScreen(onUnlockClick: () -> Unit) {
                 Spacer(modifier = Modifier.height(24.dp))
                 Button(
                     onClick = onUnlockClick,
+                    enabled = buttonReady,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF2BAED5)
+                        containerColor = Color(0xFF2BAED5),
+                        disabledContainerColor = Color(0xFF2BAED5).copy(alpha = 0.5f)
                     ),
                 ) {
                     Text(
-                        text = "Verify to Unlock",
+                        text = "Tap to Unlock",
                         modifier = Modifier.padding(horizontal = 8.dp), // Space inside the button
                         color = if (isDark) Color.Black else Color.White
                     )
