@@ -33,7 +33,7 @@
 
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-8089997046166779~7957807916"/>
+            android:value="${ADMOB_APP_ID}" />
 
         <receiver android:name=".NetworkTrustActionReceiver" android:exported="false" />
 

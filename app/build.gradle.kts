@@ -1,8 +1,14 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
+
+val localProps = Properties()
+localProps.load(FileInputStream(rootProject.file("local.properties")))
 
 android {
     namespace = "com.example.networkshare"
@@ -18,6 +24,10 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "ADMOB_BANNER_ID", "\"${localProps["ADMOB_BANNER_ID"]}\"")
+        buildConfigField("String", "ADMOB_INTERSTITIAL_ID", "\"${localProps["ADMOB_INTERSTITIAL_ID"]}\"")
+        manifestPlaceholders["ADMOB_APP_ID"] = localProps["ADMOB_APP_ID"] as String
     }
 
     buildTypes {
@@ -38,6 +48,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
