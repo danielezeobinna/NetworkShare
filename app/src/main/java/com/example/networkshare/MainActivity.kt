@@ -588,7 +588,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                                             )
                                                         )
                                                         adUnitId =
-                                                            "ca-app-pub-3940256099942544/6300978111" // Test ID
+                                                            "ca-app-pub-8089997046166779/1338094099"
                                                         adListener = object : AdListener() {
                                                             override fun onAdLoaded() {
                                                                 // Ad loaded — give it space, max 65dp
@@ -800,7 +800,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     private fun loadInterstitialAd() {
         InterstitialAd.load(
             this,
-            "ca-app-pub-3940256099942544/1033173712", // ← test ID for now
+            "ca-app-pub-8089997046166779/6664907548",
             AdRequest.Builder().build(),
             object : InterstitialAdLoadCallback() {
                 override fun onAdLoaded(ad: InterstitialAd) {
