@@ -621,6 +621,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         }
     }
 
+    @Suppress("DEPRECATION")
     private fun showBiometricPrompt() {
         val now = System.currentTimeMillis()
         if (isUnlocked && now - lastUnlockedTime < cooldownMs) {
