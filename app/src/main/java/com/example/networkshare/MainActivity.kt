@@ -81,7 +81,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.expandVertically
@@ -831,40 +833,29 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         if (isPending) return
         isPending = true
 
+        // Start/stop the service immediately — ads are independent
+        if (start && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            toggleService(start)
+        }
+
+        // Show ad opportunistically if turning on — fire and forget
         if (start) {
             interstitialAd?.let { ad ->
                 ad.fullScreenContentCallback = object : FullScreenContentCallback() {
                     override fun onAdDismissedFullScreenContent() {
                         interstitialAd = null
                         loadInterstitialAd()
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                        } else {
-                            toggleService(true)
-                        }
                     }
                     override fun onAdFailedToShowFullScreenContent(error: AdError) {
                         interstitialAd = null
                         loadInterstitialAd()
-                        // Ad failed, just start service anyway
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                        } else {
-                            toggleService(true)
-                        }
                     }
                 }
                 isShowingAd = true
                 ad.show(this)
-                return
             }
-        }
-
-        // No ad loaded or turning off — proceed normally
-        if (start && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        } else {
-            toggleService(start)
         }
     }
 
@@ -1826,22 +1817,18 @@ fun DiscoveryScreen(
                             color = MaterialTheme.colorScheme.background,
                             shape = androidx.compose.foundation.shape.CircleShape
                         )
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = ripple(
-                                color = Color.Gray,
-                                bounded = true,
-                                radius = 19.dp
-                            ),
-                            onClick = { showMenu = true }
-                        )
                 ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.baseline_dehaze),
-                        contentDescription = "Menu",
-                        tint = Color(0xFF666660),
-                        modifier = Modifier.size(22.dp)
-                    )
+                    IconButton(
+                        onClick = { showMenu = true },
+                        modifier = Modifier.size(38.dp)
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.baseline_dehaze),
+                            contentDescription = "Menu",
+                            tint = Color(0xFF666660),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
                 }
 
                 DropdownMenu(
@@ -2057,7 +2044,7 @@ fun FilePickerSection(
             // Back Button (<)
             IconButton(
                 onClick = { handleBack() },
-                modifier = Modifier.size(32.dp).offset(x = (-8).dp)
+                modifier = Modifier.size(38.dp).offset(x = (-8).dp)
             ) {
                 Icon(
                     painter = painterResource(id = R.drawable.baseline_chevron_left),
@@ -2184,6 +2171,7 @@ fun StorageRow(
     path: String,
     fullPath: String,
     isLast: Boolean = false,
+    index: Int = 0,
     onClick: () -> Unit
 ) {
     val isDark = LocalDarkTheme.current
@@ -2199,7 +2187,6 @@ fun StorageRow(
     }
 
     val inheritedColor = if (isDark) Color.Gray else Color.LightGray
-
     val inheritedCheck = if (isDark) Color.LightGray else Color.White
 
     val isPartiallyChecked = remember(fullPath, WebDAVService.selectedPaths.size) {
@@ -2208,9 +2195,31 @@ fun StorageRow(
         }
     }
 
+    // Slide-in animation staggered by index
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(index * 40L)
+        visible = true
+    }
+
+    val offsetX by animateFloatAsState(
+        targetValue = if (visible) 0f else 40f,
+        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+        label = "slideIn"
+    )
+    val alpha by animateFloatAsState(
+        targetValue = if (visible) 1f else 0f,
+        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+        label = "fadeIn"
+    )
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .graphicsLayer {
+                translationX = offsetX.dp.toPx()
+                this.alpha = alpha
+            }
             .clickable(onClick = onClick)
             .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -2241,7 +2250,7 @@ fun StorageRow(
             if (!isLast) {
                 HorizontalDivider(
                     modifier = Modifier
-                        .offset(y = (16).dp)
+                        .offset(y = 16.dp)
                         .padding(top = 8.dp),
                     thickness = 0.5.dp,
                     color = Color.Gray.copy(alpha = 0.3f)
@@ -2268,7 +2277,6 @@ fun StorageRow(
                 .clickable {
                     if (!isInherited) {
                         WebDAVService.toggleSelection(context, fullPath)
-
                         if (WebDAVService.isRunning) {
                             val intent = Intent(context, WebDAVService::class.java).apply {
                                 action = "REFRESH_INFO"
@@ -2280,21 +2288,21 @@ fun StorageRow(
         ) {
             if (isChecked || isInherited) {
                 Icon(
-                    painter = painterResource(id = R.drawable.baseline_check), // Your generated Vector Asset
+                    painter = painterResource(id = R.drawable.baseline_check),
                     contentDescription = "Selected",
-                    tint = if (isInherited) {
-                        inheritedCheck
-                    } else if (isDark) {
-                        Color.Black
-                    } else {
-                        Color.White
-                    },
+                    tint = if (isInherited) inheritedCheck
+                    else if (isDark) Color.Black
+                    else Color.White,
                     modifier = Modifier
-                        .size(22.dp) // Slightly larger than the 14.sp text to maintain "weight"
+                        .size(22.dp)
                         .padding(2.dp)
                 )
             } else if (isPartiallyChecked) {
-                Box(modifier = Modifier.size(10.dp).background(Color(0xFF2BAED5), RoundedCornerShape(2.dp)))
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .background(Color(0xFF2BAED5), RoundedCornerShape(2.dp))
+                )
             }
         }
     }
