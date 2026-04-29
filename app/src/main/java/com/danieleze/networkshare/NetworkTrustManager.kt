@@ -1,4 +1,4 @@
-package com.example.networkshare
+package com.danieleze.networkshare
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -22,9 +22,9 @@ object NetworkTrustManager {
 
     const val CHANNEL_ID       = "network_trust_channel"
     const val EXTRA_SSID       = "extra_ssid"
-    const val ACTION_ALLOW      = "com.example.networkshare.NETWORK_ALLOW"
-    const val ACTION_ALLOW_ONCE = "com.example.networkshare.NETWORK_ALLOW_ONCE"
-    const val ACTION_BLOCK      = "com.example.networkshare.NETWORK_BLOCK"
+    const val ACTION_ALLOW      = "com.danieleze.networkshare.NETWORK_ALLOW"
+    const val ACTION_ALLOW_ONCE = "com.danieleze.networkshare.NETWORK_ALLOW_ONCE"
+    const val ACTION_BLOCK      = "com.danieleze.networkshare.NETWORK_BLOCK"
 
     // Persisted
     val allowedNetworks = mutableStateListOf<String>()

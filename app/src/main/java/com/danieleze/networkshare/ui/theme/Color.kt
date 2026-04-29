@@ -1,4 +1,4 @@
-package com.example.networkshare.ui.theme
+package com.danieleze.networkshare.ui.theme
 
 import androidx.compose.ui.graphics.Color
 

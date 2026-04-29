@@ -11,13 +11,13 @@ val localProps = Properties()
 localProps.load(FileInputStream(rootProject.file("local.properties")))
 
 android {
-    namespace = "com.example.networkshare"
+    namespace = "com.danieleze.networkshare"
     compileSdk {
         version = release(36)
     }
 
     defaultConfig {
-        applicationId = "com.example.networkshare"
+        applicationId = "com.danieleze.networkshare"
         minSdk = 26
         targetSdk = 36
         versionCode = 1

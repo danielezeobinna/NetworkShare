@@ -1,4 +1,4 @@
-package com.example.networkshare
+package com.danieleze.networkshare
 
 import org.junit.Test
 

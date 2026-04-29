@@ -1,4 +1,4 @@
-package com.example.networkshare
+package com.danieleze.networkshare
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -30,7 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
-import com.example.networkshare.ui.theme.NetworkShareTheme
+import com.danieleze.networkshare.ui.theme.NetworkShareTheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.ui.graphics.graphicsLayer
@@ -104,13 +104,17 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalView
 import androidx.core.graphics.toColorInt
 import androidx.core.view.WindowCompat
-import com.example.networkshare.ui.theme.AppTheme
-import com.example.networkshare.ui.theme.LocalDarkTheme
+import com.danieleze.networkshare.ui.theme.AppTheme
+import com.danieleze.networkshare.ui.theme.LocalDarkTheme
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import kotlinx.coroutines.delay
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 
 class MainActivity : androidx.fragment.app.FragmentActivity() {
     companion object {
@@ -139,13 +143,13 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
-                "com.example.networkshare.SERVER_STOPPED" -> {
+                "com.danieleze.networkshare.SERVER_STOPPED" -> {
                     isDiscoveryOn = false
                 }
-                "com.example.networkshare.CHECK_LOCATION" -> {
+                "com.danieleze.networkshare.CHECK_LOCATION" -> {
                     checkLocationForUntrustedNetwork()
                 }
-                "com.example.networkshare.ADDRESSES_UPDATED" -> {
+                "com.danieleze.networkshare.ADDRESSES_UPDATED" -> {
                     val data = intent.getStringExtra("address_list")
                     val validNetwork = intent.getBooleanExtra("is_valid_network", true)
                     if (data != null) {
@@ -221,6 +225,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                 val showAllowedNetworks = remember { mutableStateOf(false) }
                 val showBlockedNetworks = remember { mutableStateOf(false) }
                 val currentPickerPath = remember { mutableStateOf<File?>(null) }
+                var navigatingForward by remember { mutableStateOf(true) }
 
                 val view = LocalView.current
                 if (!view.isInEditMode) {
@@ -241,14 +246,23 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                             .fillMaxSize()
                             .navigationBarsPadding()
                     ) {
-                        // Everything that was in your Surface before
                         Box(modifier = Modifier.weight(1f)) {
-                            when {
-                                !isUnlocked -> {
+                            AnimatedContent(
+                                targetState = isUnlocked,
+                                transitionSpec = {
+                                    if (targetState) {
+                                        // unlocking: main screen slides in from right
+                                        slideInHorizontally { it } togetherWith slideOutHorizontally { -it }
+                                    } else {
+                                        // locking: biometric gate slides in from left
+                                        slideInHorizontally { -it } togetherWith slideOutHorizontally { it }
+                                    }
+                                },
+                                label = "unlockTransition"
+                            ) { unlocked ->
+                                if (!unlocked) {
                                     BiometricGateScreen(onUnlockClick = { showBiometricPrompt() })
-                                }
-
-                                else -> {
+                                } else {
                                     Column(modifier = Modifier.fillMaxSize()) {
                                         Box(modifier = Modifier.weight(1f)) {
                                             val pendingTrustSsid = WebDAVService.pendingTrustSsid.value
@@ -491,78 +505,77 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                                     }
                                                 }
                                             }
-                                            when {
-                                                showUserGuide.value -> UserGuideScreen(
-                                                    onBack = { showUserGuide.value = false }
-                                                )
+                                            val screenState = when {
+                                                showUserGuide.value -> "userGuide"
+                                                showAllowedNetworks.value -> "allowedNetworks"
+                                                showBlockedNetworks.value -> "blockedNetworks"
+                                                !isPickerOpen.value -> "discovery"
+                                                else -> "filePicker"
+                                            }
 
-                                                showAllowedNetworks.value -> NetworkListScreen(
-                                                    title = "Allowed Networks",
-                                                    networks = NetworkTrustManager.allowedNetworks,
-                                                    iconRes = R.drawable.ic_wifi,
-                                                    onRemove = { ssid ->
-                                                        NetworkTrustManager.remove(
-                                                            this@MainActivity,
-                                                            ssid
-                                                        )
-                                                    },
-                                                    onBack = { showAllowedNetworks.value = false }
-                                                )
-
-                                                showBlockedNetworks.value -> NetworkListScreen(
-                                                    title = "Blocked Networks",
-                                                    networks = NetworkTrustManager.blockedNetworks,
-                                                    iconRes = R.drawable.ic_wifi,
-                                                    onRemove = { ssid ->
-                                                        NetworkTrustManager.remove(
-                                                            this@MainActivity,
-                                                            ssid
-                                                        )
-                                                    },
-                                                    onBack = { showBlockedNetworks.value = false }
-                                                )
-
-                                                !isPickerOpen.value -> DiscoveryScreen(
-                                                    isOn = isDiscoveryOn,
-                                                    isPending = isPending,
-                                                    addresses = serverAddresses,
-                                                    onToggle = { start->
-                                                        handleToggle(start)
-                                                    },
-                                                    onReload = {
-                                                        if (isDiscoveryOn) {
-                                                            val svcIntent = Intent(this@MainActivity, WebDAVService::class.java).apply {
-                                                                action = "RESTART_SERVERS"
+                                            AnimatedContent(
+                                                targetState = screenState to navigatingForward,
+                                                transitionSpec = {
+                                                    val forward = targetState.second
+                                                    if (forward) {
+                                                        slideInHorizontally { it } togetherWith slideOutHorizontally { -it }
+                                                    } else {
+                                                        slideInHorizontally { -it } togetherWith slideOutHorizontally { it }
+                                                    }
+                                                },
+                                                label = "screenTransition"
+                                            ) { (state, _) ->
+                                                when (state) {
+                                                    "userGuide" -> UserGuideScreen(
+                                                        onBack = { navigatingForward = false; showUserGuide.value = false }
+                                                    )
+                                                    "allowedNetworks" -> NetworkListScreen(
+                                                        title = "Allowed Networks",
+                                                        networks = NetworkTrustManager.allowedNetworks,
+                                                        iconRes = R.drawable.ic_wifi,
+                                                        onRemove = { ssid -> NetworkTrustManager.remove(this@MainActivity, ssid) },
+                                                        onBack = { navigatingForward = false; showAllowedNetworks.value = false }
+                                                    )
+                                                    "blockedNetworks" -> NetworkListScreen(
+                                                        title = "Blocked Networks",
+                                                        networks = NetworkTrustManager.blockedNetworks,
+                                                        iconRes = R.drawable.ic_wifi,
+                                                        onRemove = { ssid -> NetworkTrustManager.remove(this@MainActivity, ssid) },
+                                                        onBack = { navigatingForward = false; showBlockedNetworks.value = false }
+                                                    )
+                                                    "discovery" -> DiscoveryScreen(
+                                                        isOn = isDiscoveryOn,
+                                                        isPending = isPending,
+                                                        addresses = serverAddresses,
+                                                        onToggle = { start -> handleToggle(start) },
+                                                        onReload = {
+                                                            if (isDiscoveryOn) {
+                                                                val svcIntent = Intent(this@MainActivity, WebDAVService::class.java).apply {
+                                                                    action = "RESTART_SERVERS"
+                                                                }
+                                                                startService(svcIntent)
                                                             }
-                                                            startService(svcIntent)
-                                                        }
-                                                    },
-                                                    onOpenPicker = { isPickerOpen.value = true },
-                                                    onOpenAllowedNetworks = {
-                                                        showAllowedNetworks.value = true
-                                                    },   // ← add
-                                                    onOpenBlockedNetworks = {
-                                                        showBlockedNetworks.value = true
-                                                    },    // ← add
-                                                    onOpenUserGuide = {
-                                                        showUserGuide.value = true
-                                                    },
-                                                    currentTheme = appTheme,
-                                                    onThemeChange = { theme ->
-                                                        appTheme = theme
-                                                        getPreferences(MODE_PRIVATE).edit { putString("app_theme", theme.name) }
-                                                    },
-                                                    isDark = when (appTheme) {
-                                                        AppTheme.LIGHT -> false
-                                                        AppTheme.DARK -> true
-                                                        AppTheme.SYSTEM -> isSystemInDarkTheme()
-                                                    },
-                                                )
-
-                                                else -> FilePickerSection(
-                                                    onBack = { isPickerOpen.value = false },
-                                                    currentPath = currentPickerPath
-                                                )
+                                                        },
+                                                        onOpenPicker = { navigatingForward = true; isPickerOpen.value = true },
+                                                        onOpenAllowedNetworks = { navigatingForward = true; showAllowedNetworks.value = true },
+                                                        onOpenBlockedNetworks = { navigatingForward = true; showBlockedNetworks.value = true },
+                                                        onOpenUserGuide = { navigatingForward = true; showUserGuide.value = true },
+                                                        currentTheme = appTheme,
+                                                        onThemeChange = { theme ->
+                                                            appTheme = theme
+                                                            getPreferences(MODE_PRIVATE).edit { putString("app_theme", theme.name) }
+                                                        },
+                                                        isDark = when (appTheme) {
+                                                            AppTheme.LIGHT -> false
+                                                            AppTheme.DARK -> true
+                                                            AppTheme.SYSTEM -> isSystemInDarkTheme()
+                                                        },
+                                                    )
+                                                    else -> FilePickerSection(
+                                                        onBack = { navigatingForward = false; isPickerOpen.value = false },
+                                                        currentPath = currentPickerPath
+                                                    )
+                                                }
                                             }
                                         }
 
@@ -635,7 +648,6 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 
         // 1. No security at all — just let them in
         if (!km.isDeviceSecure) {
-            isUnlocked = true
             lastUnlockedTime = System.currentTimeMillis()
             initPermissions()
             return
@@ -651,7 +663,6 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
             if (intent != null) {
                 startActivityForResult(intent, REQ_PIN)
             } else {
-                isUnlocked = true
                 lastUnlockedTime = System.currentTimeMillis()
                 initPermissions()
             }
@@ -674,7 +685,6 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
             object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                     super.onAuthenticationSucceeded(result)
-                    isUnlocked = true
                     lastUnlockedTime = System.currentTimeMillis()
                     initPermissions()
                 }
@@ -719,7 +729,6 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 
         if (requestCode == REQ_PIN) {
             if (resultCode == RESULT_OK) {
-                isUnlocked = true
                 lastUnlockedTime = System.currentTimeMillis()
                 initPermissions()
             } else {
@@ -731,9 +740,9 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     override fun onStart() {
         super.onStart()
         val filter = IntentFilter().apply {
-            addAction("com.example.networkshare.SERVER_STOPPED")
-            addAction("com.example.networkshare.ADDRESSES_UPDATED")
-            addAction("com.example.networkshare.CHECK_LOCATION")
+            addAction("com.danieleze.networkshare.SERVER_STOPPED")
+            addAction("com.danieleze.networkshare.ADDRESSES_UPDATED")
+            addAction("com.danieleze.networkshare.CHECK_LOCATION")
         }
         val listenFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             RECEIVER_NOT_EXPORTED
@@ -1962,30 +1971,37 @@ fun FilePickerSection(
 ) {
     val context = LocalContext.current
     val activity = context as MainActivity
-    var currentPath by currentPath
-
-    val handleBack = {
-        if (currentPath == null) {
-            if (WebDAVService.isRunning) {
-                val intent = Intent(context, WebDAVService::class.java).apply {
-                    action = "REFRESH_INFO"
-                }
-                context.startService(intent)  // not startForegroundService
-            }
-            onBack()
-        } else {
-            val storages = activity.getAvailableStorages()
-            currentPath = if (storages.any { it.absolutePath == currentPath?.absolutePath }) {
-                null
-            } else {
-                currentPath?.parentFile
-            }
-            WebDAVService.scannedItems.clear()
-        }
-    }
-
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+
+    var currentPath by currentPath
+    var isExiting by remember { mutableStateOf(false) }
+
+
+    val handleBack = {
+        scope.launch {
+            isExiting = true
+            delay(220)
+            isExiting = false
+            if (currentPath == null) {
+                if (WebDAVService.isRunning) {
+                    val intent = Intent(context, WebDAVService::class.java).apply {
+                        action = "REFRESH_INFO"
+                    }
+                    context.startService(intent)
+                }
+                onBack()
+            } else {
+                val storages = activity.getAvailableStorages()
+                currentPath = if (storages.any { it.absolutePath == currentPath?.absolutePath }) {
+                    null
+                } else {
+                    currentPath?.parentFile
+                }
+                WebDAVService.scannedItems.clear()
+            }
+        }
+    }
 
     val pathParts = remember(currentPath) {
         val parts = mutableListOf<File>()
@@ -2069,8 +2085,13 @@ fun FilePickerSection(
                         .size(26.dp)
                         .clickable {
                             if (currentPath != null) {
-                                currentPath = null
-                                WebDAVService.scannedItems.clear()
+                                scope.launch {
+                                    isExiting = true
+                                    delay(220)
+                                    isExiting = false
+                                    currentPath = null
+                                    WebDAVService.scannedItems.clear()
+                                }
                             }
                         }
                 )
@@ -2105,7 +2126,15 @@ fun FilePickerSection(
                                 fontSize = 18.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = if (index == pathParts.size - 1) MaterialTheme.colorScheme.onSurface else Color.Gray,
-                                modifier = Modifier.clickable { currentPath = file }
+                                modifier = Modifier.clickable {
+                                    scope.launch {
+                                        isExiting = true
+                                        delay(220)
+                                        isExiting = false
+                                        currentPath = file
+                                        WebDAVService.scannedItems.clear()
+                                    }
+                                }
                             )
                         }
                     }
@@ -2133,27 +2162,31 @@ fun FilePickerSection(
             ) {
                 items(itemsToShow, key = { it.file.absolutePath }) { folderItem ->
 
-                    val isStorageRoot = currentPath == null
+                    val isStorageRoot = remember(isExiting) { currentPath == null }
                     val isLast = folderItem == itemsToShow.last()
 
-                    val label = remember(folderItem, currentPath) {
-                        if (isStorageRoot && folderItem.file.absolutePath.contains("emulated/0")) {
-                            "Internal Storage"
-                        } else if (isStorageRoot) {
-                            "SD Card (${folderItem.name})"
-                        } else {
-                            folderItem.name
+                    val label = remember(folderItem, isStorageRoot) {
+                        when {
+                            isStorageRoot && folderItem.file.absolutePath.contains("emulated/0") -> "Internal Storage"
+                            isStorageRoot -> "SD Card (${folderItem.name})"
+                            else -> folderItem.name
                         }
                     }
 
                     StorageRow(
                         name = label,
-                        path = if (currentPath == null) folderItem.file.absolutePath else "Folder",
+                        path = if (isStorageRoot) folderItem.file.absolutePath else "Folder",
                         fullPath = folderItem.file.absolutePath,
+                        isExiting = isExiting,
                         isLast = isLast,
                         onClick = {
                             if (folderItem.hasSubFolders || isStorageRoot) {
-                                currentPath = folderItem.file
+                                scope.launch {
+                                    isExiting = true
+                                    delay(220)
+                                    isExiting = false
+                                    currentPath = folderItem.file
+                                }
                             } else {
                                 Toast.makeText(context, "No sub-folders inside", Toast.LENGTH_SHORT).show()
                             }
@@ -2171,6 +2204,7 @@ fun StorageRow(
     path: String,
     fullPath: String,
     isLast: Boolean = false,
+    isExiting: Boolean = false,
     index: Int = 0,
     onClick: () -> Unit
 ) {
@@ -2197,20 +2231,24 @@ fun StorageRow(
 
     // Slide-in animation staggered by index
     var visible by remember { mutableStateOf(false) }
+
     LaunchedEffect(Unit) {
         delay(index * 40L)
         visible = true
     }
 
+    // Exit: when isExiting flips true, animate back out
+    val effectiveVisible = visible && !isExiting
+
     val offsetX by animateFloatAsState(
-        targetValue = if (visible) 0f else 40f,
+        targetValue = if (effectiveVisible) 0f else 40f,
         animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
-        label = "slideIn"
+        label = "slideX"
     )
     val alpha by animateFloatAsState(
-        targetValue = if (visible) 1f else 0f,
+        targetValue = if (effectiveVisible) 1f else 0f,
         animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
-        label = "fadeIn"
+        label = "fade"
     )
 
     Row(

@@ -1,4 +1,4 @@
-package com.example.networkshare.ui.theme
+package com.danieleze.networkshare.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme

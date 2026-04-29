@@ -1,4 +1,4 @@
-package com.example.networkshare
+package com.danieleze.networkshare
 
 import android.content.Context
 import androidx.core.content.edit

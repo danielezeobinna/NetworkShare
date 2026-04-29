@@ -1,4 +1,4 @@
-package com.example.networkshare
+package com.danieleze.networkshare
 
 import android.app.*
 import android.content.Context
@@ -376,7 +376,7 @@ class WebDAVService : Service(), TransferListener {
         val boundIp = activeServers.firstOrNull()?.boundIp ?: "0.0.0.0"
         val isValidNetwork = boundIp != "0.0.0.0"
 
-        val intent = Intent("com.example.networkshare.ADDRESSES_UPDATED")
+        val intent = Intent("com.danieleze.networkshare.ADDRESSES_UPDATED")
         intent.putExtra("address_list", statusSummary.toString().trim().ifEmpty { "No folders selected." })
         intent.putExtra("is_valid_network", isValidNetwork)
         intent.setPackage(packageName)
@@ -589,7 +589,7 @@ class WebDAVService : Service(), TransferListener {
 
         when {
             ssid.isBlank() || ssid == "<unknown ssid>" -> {
-                val locationIntent = Intent("com.example.networkshare.CHECK_LOCATION")
+                val locationIntent = Intent("com.danieleze.networkshare.CHECK_LOCATION")
                 locationIntent.setPackage(packageName)
                 sendBroadcast(locationIntent)
                 isNetworkTrusted.value = false
@@ -651,7 +651,7 @@ class WebDAVService : Service(), TransferListener {
         }
         activeServers.forEach { it.stopServer() }
         activeServers.clear()
-        val stopIntent = Intent("com.example.networkshare.SERVER_STOPPED")
+        val stopIntent = Intent("com.danieleze.networkshare.SERVER_STOPPED")
         stopIntent.setPackage(packageName)
         sendBroadcast(stopIntent)
         networkCallback?.let {
