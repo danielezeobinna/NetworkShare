@@ -269,240 +269,19 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                                 if (pendingTrustSsid != null && isDiscoveryOn) showUnknownNetworkDialog = true
                                             }
 
-                                            if (showUnknownNetworkDialog && pendingTrustSsid != null) {
-                                                val isDark = when (appTheme) {
-                                                    AppTheme.LIGHT -> false
-                                                    AppTheme.DARK -> true
-                                                    AppTheme.SYSTEM -> isSystemInDarkTheme()
-                                                }
-                                                Dialog(
-                                                    onDismissRequest = { showUnknownNetworkDialog = false },
-                                                    properties = DialogProperties(
-                                                        usePlatformDefaultWidth = false,
-                                                        dismissOnBackPress = true,
-                                                        dismissOnClickOutside = true
-                                                    )
-                                                ) {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .fillMaxSize(0.98f)
-                                                            .clickable(
-                                                                interactionSource = remember { MutableInteractionSource() },
-                                                                indication = null
-                                                            ) { showUnknownNetworkDialog = false },
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
-                                                        Surface(
-                                                            modifier = Modifier
-                                                                .offset(y = (-24).dp)
-                                                                .fillMaxWidth(0.95f)
-                                                                .padding(horizontal = 4.dp),
-                                                            shape = RoundedCornerShape(28.dp),
-                                                            color = if (isDark) Color(0xFF252525) else Color(0xFFFCFCFC),
-                                                            tonalElevation = 6.dp
-                                                        ) {
-                                                            Column(
-                                                                modifier = Modifier.padding(24.dp),
-                                                                horizontalAlignment = Alignment.Start
-                                                            ) {
-                                                                Text(
-                                                                    text = "Unknown Network Detected",
-                                                                    fontWeight = FontWeight.Bold,
-                                                                    fontSize = 20.sp,
-                                                                    color = MaterialTheme.colorScheme.onSurface
-                                                                )
+                                            UnknownNetworkDialog(
+                                                show = showUnknownNetworkDialog,
+                                                ssid = pendingTrustSsid,
+                                                appTheme = appTheme,
+                                                onDismiss = { showUnknownNetworkDialog = false }
+                                            )
 
-                                                                Spacer(modifier = Modifier.height(16.dp))
+                                            NotificationPermissionDialog(
+                                                show = showNotificationDialog,
+                                                appTheme = appTheme,
+                                                onDismiss = { showNotificationDialog = false }
+                                            )
 
-                                                                Text(
-                                                                    text = "\"$pendingTrustSsid\" is an unknown network. Choose whether NetworkShare should share files on this network.",
-                                                                    fontSize = 16.sp,
-                                                                    color = MaterialTheme.colorScheme.onSurface
-                                                                )
-
-                                                                Spacer(modifier = Modifier.height(24.dp))
-
-                                                                Row(
-                                                                    modifier = Modifier.fillMaxWidth(),
-                                                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                                                    verticalAlignment = Alignment.CenterVertically
-                                                                ) {
-                                                                    Column(modifier = Modifier.fillMaxWidth()) {
-                                                                        TextButton(
-                                                                            onClick = {
-                                                                                NetworkTrustManager.allow(
-                                                                                    this@MainActivity,
-                                                                                    pendingTrustSsid
-                                                                                )
-                                                                                WebDAVService.pendingTrustSsid.value =
-                                                                                    null
-                                                                                NetworkTrustManager.restoreSharingNotification(
-                                                                                    this@MainActivity
-                                                                                )
-                                                                                showUnknownNetworkDialog =
-                                                                                    false
-                                                                            },
-                                                                            modifier = Modifier.fillMaxWidth()
-                                                                        ) {
-                                                                            Text(
-                                                                                "Allow",
-                                                                                color = Color(
-                                                                                    0xFF2BAED5
-                                                                                ),
-                                                                                fontSize = 16.sp
-                                                                            )
-                                                                        }
-
-                                                                        TextButton(
-                                                                            onClick = {
-                                                                                NetworkTrustManager.allowOnce(
-                                                                                    pendingTrustSsid
-                                                                                )
-                                                                                WebDAVService.pendingTrustSsid.value =
-                                                                                    null
-                                                                                NetworkTrustManager.restoreSharingNotification(
-                                                                                    this@MainActivity
-                                                                                )
-                                                                                showUnknownNetworkDialog =
-                                                                                    false
-                                                                            },
-                                                                            modifier = Modifier.fillMaxWidth()
-                                                                        ) {
-                                                                            Text(
-                                                                                "Allow Once",
-                                                                                color = Color(
-                                                                                    0xFF2BAED5
-                                                                                ),
-                                                                                fontSize = 16.sp
-                                                                            )
-                                                                        }
-
-                                                                        TextButton(
-                                                                            onClick = {
-                                                                                NetworkTrustManager.block(
-                                                                                    this@MainActivity,
-                                                                                    pendingTrustSsid
-                                                                                )
-                                                                                WebDAVService.pendingTrustSsid.value =
-                                                                                    null
-                                                                                NetworkTrustManager.restoreSharingNotification(
-                                                                                    this@MainActivity
-                                                                                )
-                                                                                showUnknownNetworkDialog =
-                                                                                    false
-                                                                            },
-                                                                            modifier = Modifier.fillMaxWidth()
-                                                                        ) {
-                                                                            Text(
-                                                                                "Block",
-                                                                                color = Color(
-                                                                                    0xFF2BAED5
-                                                                                ),
-                                                                                fontSize = 16.sp
-                                                                            )
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-
-                                            if (showNotificationDialog) {
-                                                val isDark = when (appTheme) {
-                                                    AppTheme.LIGHT -> false
-                                                    AppTheme.DARK -> true
-                                                    AppTheme.SYSTEM -> isSystemInDarkTheme()
-                                                }
-                                                Dialog(
-                                                    onDismissRequest = { showNotificationDialog = false },
-                                                    properties = DialogProperties(
-                                                        usePlatformDefaultWidth = false,
-                                                        dismissOnBackPress = true,
-                                                        dismissOnClickOutside = true
-                                                    )
-                                                ) {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .fillMaxSize(0.98f)
-                                                            .clickable(
-                                                                interactionSource = remember { MutableInteractionSource() },
-                                                                indication = null
-                                                            ) { showNotificationDialog = false },
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
-                                                        Surface(
-                                                            modifier = Modifier
-                                                                .offset(y = (-24).dp)
-                                                                .fillMaxWidth(0.95f)
-                                                                .padding(horizontal = 4.dp),
-                                                            shape = RoundedCornerShape(28.dp),
-                                                            color = if (isDark) Color(0xFF252525) else Color(0xFFFCFCFC),
-                                                            tonalElevation = 6.dp
-                                                        ) {
-                                                            Column(
-                                                                modifier = Modifier.padding(24.dp),
-                                                                horizontalAlignment = Alignment.Start
-                                                            ) {
-                                                                Text(
-                                                                    text = "Notifications Required",
-                                                                    fontWeight = FontWeight.Bold,
-                                                                    fontSize = 20.sp,
-                                                                    color = MaterialTheme.colorScheme.onSurface
-                                                                )
-
-                                                                Spacer(modifier = Modifier.height(16.dp))
-
-                                                                Text(
-                                                                    text = "Android requires notifications to be enabled for NetworkShare to run. Please enable notifications for this app in Settings.",
-                                                                    fontSize = 16.sp,
-                                                                    color = MaterialTheme.colorScheme.onSurface
-                                                                )
-
-                                                                Spacer(modifier = Modifier.height(24.dp))
-
-                                                                HorizontalDivider(
-                                                                    modifier = Modifier.padding(
-                                                                        horizontal = 8.dp
-                                                                    ),
-                                                                    thickness = 0.5.dp,
-                                                                    color = Color.Gray.copy(
-                                                                        alpha = 0.2f
-                                                                    )
-                                                                )
-
-                                                                Row(
-                                                                    modifier = Modifier.fillMaxWidth(),
-                                                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                                                    verticalAlignment = Alignment.CenterVertically
-                                                                ) {
-                                                                    TextButton(
-                                                                        onClick = {
-                                                                            showNotificationDialog = false
-                                                                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                                                                val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-                                                                                    putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
-                                                                                }
-                                                                                startActivity(intent)
-                                                                            }
-                                                                        },
-                                                                        modifier = Modifier
-                                                                            .weight(1f)
-                                                                            // We use clickable here to force the custom ripple color
-                                                                            .clickable(
-                                                                                interactionSource = remember { MutableInteractionSource() },
-                                                                                onClick = { /* This is handled by the TextButton's onClick */ }
-                                                                            )
-                                                                    ) {
-                                                                        Text("Open Settings", color = Color(0xFF2BAED5), fontSize = 18.sp)
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
                                             val screenState = when {
                                                 showUserGuide.value -> "userGuide"
                                                 showAllowedNetworks.value -> "allowedNetworks"
@@ -634,6 +413,110 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         }
     }
 
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+
+        if (requestCode == REQ_PIN) {
+            if (resultCode == RESULT_OK) {
+                initPermissions()
+            }
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        val filter = IntentFilter().apply {
+            addAction("com.danieleze.networkshare.SERVER_STOPPED")
+            addAction("com.danieleze.networkshare.ADDRESSES_UPDATED")
+            addAction("com.danieleze.networkshare.CHECK_LOCATION")
+        }
+        val listenFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            RECEIVER_NOT_EXPORTED
+        } else { 0 }
+        registerReceiver(receiver, filter, listenFlag)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        try { unregisterReceiver(receiver) } catch (_: Exception) {}
+    }
+
+    override fun onResume() {
+        super.onResume()
+        isDiscoveryOn = isServiceRunning()
+
+        if (pausedAtTime > 0L && System.currentTimeMillis() - pausedAtTime >= 30_000L) {
+            isUnlocked = false
+        }
+        pausedAtTime = 0L
+
+        // Returning from interstitial ad — skip auth re-check
+        if (isShowingAd) {
+            isShowingAd = false
+            // still do the refresh and pending dialog below
+            if (isDiscoveryOn) {
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    val intent = Intent(this, WebDAVService::class.java).apply {
+                        action = "REFRESH_INFO"
+                    }
+                    startService(intent)
+                }, 1500)
+            }
+            val pending = WebDAVService.pendingTrustSsid.value
+            if (pending != null && isDiscoveryOn) showUnknownNetworkDialog = true
+            return
+        }
+
+        if (isDiscoveryOn) {
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                val intent = Intent(this, WebDAVService::class.java).apply {
+                    action = "REFRESH_INFO"
+                }
+                startService(intent)
+            }, 1500)
+        }
+        val pending = WebDAVService.pendingTrustSsid.value
+        if (pending != null && isDiscoveryOn) {
+            showUnknownNetworkDialog = true
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        if (!isShowingAd) {
+            pausedAtTime = System.currentTimeMillis()
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingShare(intent)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 101) {
+            val granted = grantResults.isNotEmpty() &&
+                    grantResults.any { it == android.content.pm.PackageManager.PERMISSION_GRANTED }
+            if (!granted) {
+                stopService(Intent(this, WebDAVService::class.java))
+                isDiscoveryOn = false
+            }
+            if (granted) {
+                // Storage confirmed — unlock and show discovery screen
+                isUnlocked = true
+            } else {
+                // Stay locked — storage is required
+                Toast.makeText(this, "Storage permission is required to use NetworkShare", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
     @Suppress("DEPRECATION")
     private fun showBiometricPrompt() {
         val km = getSystemService(KEYGUARD_SERVICE) as KeyguardManager
@@ -714,87 +597,30 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         biometricPrompt.authenticate(builder.build())
     }
 
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-
-        if (requestCode == REQ_PIN) {
-            if (resultCode == RESULT_OK) {
-                initPermissions()
-            } else {
-                // User cancelled or failed — stay on gate screen, do nothing
-            }
-        }
-    }
-
-    override fun onStart() {
-        super.onStart()
-        val filter = IntentFilter().apply {
-            addAction("com.danieleze.networkshare.SERVER_STOPPED")
-            addAction("com.danieleze.networkshare.ADDRESSES_UPDATED")
-            addAction("com.danieleze.networkshare.CHECK_LOCATION")
-        }
-        val listenFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            RECEIVER_NOT_EXPORTED
-        } else { 0 }
-        registerReceiver(receiver, filter, listenFlag)
-    }
-
-    override fun onStop() {
-        super.onStop()
-        try { unregisterReceiver(receiver) } catch (_: Exception) {}
-    }
-
-    override fun onResume() {
-        super.onResume()
-        isDiscoveryOn = isServiceRunning()
-
-        if (pausedAtTime > 0L && System.currentTimeMillis() - pausedAtTime >= 30_000L) {
-            isUnlocked = false
-        }
-        pausedAtTime = 0L
-
-        // Returning from interstitial ad — skip auth re-check
-        if (isShowingAd) {
-            isShowingAd = false
-            // still do the refresh and pending dialog below
-            if (isDiscoveryOn) {
-                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                    val intent = Intent(this, WebDAVService::class.java).apply {
-                        action = "REFRESH_INFO"
-                    }
-                    startService(intent)
-                }, 1500)
-            }
-            val pending = WebDAVService.pendingTrustSsid.value
-            if (pending != null && isDiscoveryOn) showUnknownNetworkDialog = true
-            return
-        }
-
-        if (isDiscoveryOn) {
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                val intent = Intent(this, WebDAVService::class.java).apply {
-                    action = "REFRESH_INFO"
+    private fun initPermissions() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // Android 11+ — MANAGE_EXTERNAL_STORAGE opens system settings page
+            if (!Environment.isExternalStorageManager()) {
+                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                    data = "package:${applicationContext.packageName}".toUri()
                 }
-                startService(intent)
-            }, 1500)
+                // Unlock optimistically — settings page has no callback.
+                // onResume() re-checks storage state when user returns.
+                isUnlocked = true
+                startActivity(intent)
+            } else {
+                // Already granted — unlock now
+                isUnlocked = true
+            }
+        } else {
+            // Android 10 and below — request READ/WRITE at runtime.
+            // isUnlocked is only set in onRequestPermissionsResult after granted.
+            val permissions = arrayOf(
+                Manifest.permission.READ_EXTERNAL_STORAGE,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            )
+            androidx.core.app.ActivityCompat.requestPermissions(this, permissions, 101)
         }
-        val pending = WebDAVService.pendingTrustSsid.value
-        if (pending != null && isDiscoveryOn) {
-            showUnknownNetworkDialog = true
-        }
-    }
-
-    override fun onPause() {
-        super.onPause()
-        if (!isShowingAd) {
-            pausedAtTime = System.currentTimeMillis()
-        }
-    }
-
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        handleIncomingShare(intent)
     }
 
     private fun saveAddresses(addresses: String) {
@@ -881,32 +707,6 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         }
     }
 
-    private fun initPermissions() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // Android 11+ — MANAGE_EXTERNAL_STORAGE opens system settings page
-            if (!Environment.isExternalStorageManager()) {
-                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
-                    data = "package:${applicationContext.packageName}".toUri()
-                }
-                // Unlock optimistically — settings page has no callback.
-                // onResume() re-checks storage state when user returns.
-                isUnlocked = true
-                startActivity(intent)
-            } else {
-                // Already granted — unlock now
-                isUnlocked = true
-            }
-        } else {
-            // Android 10 and below — request READ/WRITE at runtime.
-            // isUnlocked is only set in onRequestPermissionsResult after granted.
-            val permissions = arrayOf(
-                Manifest.permission.READ_EXTERNAL_STORAGE,
-                Manifest.permission.WRITE_EXTERNAL_STORAGE
-            )
-            androidx.core.app.ActivityCompat.requestPermissions(this, permissions, 101)
-        }
-    }
-
     fun hasLocationPermission(): Boolean {
         val fineGranted = ContextCompat.checkSelfPermission(
             this, Manifest.permission.ACCESS_FINE_LOCATION
@@ -935,29 +735,6 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
             // Don't stop the service — just request the permission.
             // The service will re-evaluate trust when the callback returns.
             requestLocationPermissions()
-        }
-    }
-
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 101) {
-            val granted = grantResults.isNotEmpty() &&
-                    grantResults.any { it == android.content.pm.PackageManager.PERMISSION_GRANTED }
-            if (!granted) {
-                stopService(Intent(this, WebDAVService::class.java))
-                isDiscoveryOn = false
-            }
-            if (granted) {
-                // Storage confirmed — unlock and show discovery screen
-                isUnlocked = true
-            } else {
-                // Stay locked — storage is required
-                Toast.makeText(this, "Storage permission is required to use NetworkShare", Toast.LENGTH_LONG).show()
-            }
         }
     }
 
@@ -2630,6 +2407,183 @@ fun UserGuideScreen(onBack: () -> Unit) {
                     color = Color.Gray,
                     fontSize = 15.sp
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun UnknownNetworkDialog(
+    show: Boolean,
+    ssid: String?,
+    appTheme: AppTheme,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    if (!show || ssid == null) return
+    val isDark = when (appTheme) {
+        AppTheme.LIGHT -> false
+        AppTheme.DARK -> true
+        AppTheme.SYSTEM -> isSystemInDarkTheme()
+    }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true
+        )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize(0.98f)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { onDismiss() },
+            contentAlignment = Alignment.Center
+        ) {
+            Surface(
+                modifier = Modifier
+                    .offset(y = (-24).dp)
+                    .fillMaxWidth(0.95f)
+                    .padding(horizontal = 4.dp),
+                shape = RoundedCornerShape(28.dp),
+                color = if (isDark) Color(0xFF252525) else Color(0xFFFCFCFC),
+                tonalElevation = 6.dp
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.Start
+                ) {
+                    Text(
+                        text = "Unknown Network Detected",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 20.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "\"$ssid\" is an unknown network. Choose whether NetworkShare should share files on this network.",
+                        fontSize = 16.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        TextButton(
+                            onClick = {
+                                NetworkTrustManager.allow(context, ssid)
+                                WebDAVService.pendingTrustSsid.value = null
+                                NetworkTrustManager.restoreSharingNotification(context)
+                                onDismiss()
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Allow", color = Color(0xFF2BAED5), fontSize = 16.sp)
+                        }
+                        TextButton(
+                            onClick = {
+                                NetworkTrustManager.allowOnce(ssid)
+                                WebDAVService.pendingTrustSsid.value = null
+                                NetworkTrustManager.restoreSharingNotification(context)
+                                onDismiss()
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Allow Once", color = Color(0xFF2BAED5), fontSize = 16.sp)
+                        }
+                        TextButton(
+                            onClick = {
+                                NetworkTrustManager.block(context, ssid)
+                                WebDAVService.pendingTrustSsid.value = null
+                                NetworkTrustManager.restoreSharingNotification(context)
+                                onDismiss()
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Block", color = Color(0xFF2BAED5), fontSize = 16.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun NotificationPermissionDialog(
+    show: Boolean,
+    appTheme: AppTheme,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    if (!show) return
+    val isDark = when (appTheme) {
+        AppTheme.LIGHT -> false
+        AppTheme.DARK -> true
+        AppTheme.SYSTEM -> isSystemInDarkTheme()
+    }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true
+        )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize(0.98f)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { onDismiss() },
+            contentAlignment = Alignment.Center
+        ) {
+            Surface(
+                modifier = Modifier
+                    .offset(y = (-24).dp)
+                    .fillMaxWidth(0.95f)
+                    .padding(horizontal = 4.dp),
+                shape = RoundedCornerShape(28.dp),
+                color = if (isDark) Color(0xFF252525) else Color(0xFFFCFCFC),
+                tonalElevation = 6.dp
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.Start
+                ) {
+                    Text(
+                        text = "Notifications Required",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 20.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "Android requires notifications to be enabled for NetworkShare to run. Please enable notifications for this app in Settings.",
+                        fontSize = 16.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(24.dp))
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                        thickness = 0.5.dp,
+                        color = Color.Gray.copy(alpha = 0.2f)
+                    )
+                    TextButton(
+                        onClick = {
+                            onDismiss()
+                            val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                            }
+                            context.startActivity(intent)
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Open Settings", color = Color(0xFF2BAED5), fontSize = 18.sp)
+                    }
+                }
             }
         }
     }
