@@ -122,8 +122,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     }
 
     private var isUnlocked by mutableStateOf(false)
-    private var lastUnlockedTime = 0L
-    private val cooldownMs = 25_000L
+    private var pausedAtTime = 0L
     private var isShowingAd = false
     private var isValidNetwork by mutableStateOf(true)
     private var serverAddresses by mutableStateOf("")
@@ -185,8 +184,8 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        outState.putLong("lastUnlockedTime", lastUnlockedTime)
         outState.putBoolean("isUnlocked", isUnlocked)
+        pausedAtTime = -1L
     }
 
     @SuppressLint("ObsoleteSdkInt")
@@ -194,7 +193,6 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         if (savedInstanceState != null) {
-            lastUnlockedTime = savedInstanceState.getLong("lastUnlockedTime", 0L)
             isUnlocked = savedInstanceState.getBoolean("isUnlocked", false)
         }
 
@@ -638,17 +636,11 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 
     @Suppress("DEPRECATION")
     private fun showBiometricPrompt() {
-        val now = System.currentTimeMillis()
-        if (isUnlocked && now - lastUnlockedTime < cooldownMs) {
-            return  // Still within cooldown, skip prompt
-        }
-
         val km = getSystemService(KEYGUARD_SERVICE) as KeyguardManager
         val biometricManager = BiometricManager.from(this)
 
         // 1. No security at all — just let them in
         if (!km.isDeviceSecure) {
-            lastUnlockedTime = System.currentTimeMillis()
             initPermissions()
             return
         }
@@ -663,7 +655,6 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
             if (intent != null) {
                 startActivityForResult(intent, REQ_PIN)
             } else {
-                lastUnlockedTime = System.currentTimeMillis()
                 initPermissions()
             }
         }
@@ -685,7 +676,6 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
             object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                     super.onAuthenticationSucceeded(result)
-                    lastUnlockedTime = System.currentTimeMillis()
                     initPermissions()
                 }
 
@@ -729,7 +719,6 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 
         if (requestCode == REQ_PIN) {
             if (resultCode == RESULT_OK) {
-                lastUnlockedTime = System.currentTimeMillis()
                 initPermissions()
             } else {
                 // User cancelled or failed — stay on gate screen, do nothing
@@ -759,6 +748,11 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         super.onResume()
         isDiscoveryOn = isServiceRunning()
 
+        if (pausedAtTime > 0L && System.currentTimeMillis() - pausedAtTime >= 30_000L) {
+            isUnlocked = false
+        }
+        pausedAtTime = 0L
+
         // Returning from interstitial ad — skip auth re-check
         if (isShowingAd) {
             isShowingAd = false
@@ -776,13 +770,6 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
             return
         }
 
-        val now = System.currentTimeMillis()
-        if (now - lastUnlockedTime >= cooldownMs) {
-            isUnlocked = false
-            return
-        }
-
-        // Genuinely unlocked and within cooldown
         if (isDiscoveryOn) {
             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                 val intent = Intent(this, WebDAVService::class.java).apply {
@@ -794,6 +781,13 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         val pending = WebDAVService.pendingTrustSsid.value
         if (pending != null && isDiscoveryOn) {
             showUnknownNetworkDialog = true
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        if (!isShowingAd) {
+            pausedAtTime = System.currentTimeMillis()
         }
     }
 
