@@ -154,7 +154,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                     val validNetwork = intent.getBooleanExtra("is_valid_network", true)
                     if (data != null) {
                         serverAddresses = data
-                        isValidNetwork = validNetwork  // ← add this state
+                        isValidNetwork = validNetwork
                         saveAddresses(data)
                     }
                 }
@@ -1760,11 +1760,18 @@ fun DiscoveryScreen(
                                         TextButton(
                                             onClick = {
                                                 showNetworkDialog = false
-                                                val intent = Intent("android.settings.TETHER_SETTINGS")
+                                                WebDAVService.isWaitingForHotspot = true  // ← simpler, no cast needed
+                                                val intent = Intent("android.settings.TETHER_SETTINGS").apply {
+                                                    addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY)
+                                                }
                                                 try {
                                                     context.startActivity(intent)
                                                 } catch (_: Exception) {
-                                                    context.startActivity(Intent(Settings.ACTION_WIRELESS_SETTINGS))
+                                                    context.startActivity(
+                                                        Intent(Settings.ACTION_WIRELESS_SETTINGS).apply {
+                                                            addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY)
+                                                        }
+                                                    )
                                                 }
                                             },
                                             modifier = Modifier

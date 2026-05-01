@@ -44,7 +44,13 @@ class WebDAVService : Service(), TransferListener {
                     13 -> { // WIFI_AP_STATE_ENABLED — hotspot just turned ON
                         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                             startWebDAVServers()
-                        }, 1500) // small delay so the softap interface is fully up
+                        }, 1500)
+                        if (isWaitingForHotspot) {
+                            isWaitingForHotspot = false
+                            val bringForward = Intent(this@WebDAVService, MainActivity::class.java)
+                            bringForward.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                            startActivity(bringForward)
+                        }
                     }
                     11, 14 -> { // WIFI_AP_STATE_DISABLING / DISABLED — hotspot turning OFF
                         verifyAndStop()
@@ -693,6 +699,7 @@ class WebDAVService : Service(), TransferListener {
 
     companion object {
         var isRunning = false
+        var isWaitingForHotspot = false
         var networkState = mutableStateOf(NetworkState.NO_NETWORK)
         var isAuthEnabled = mutableStateOf(false)  // always overwritten by loadPaths()
         var isNetworkTrusted = mutableStateOf(false)
