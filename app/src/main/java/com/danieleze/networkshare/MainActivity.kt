@@ -119,9 +119,9 @@ import androidx.compose.animation.togetherWith
 class MainActivity : androidx.fragment.app.FragmentActivity() {
     companion object {
         private const val REQ_PIN = 9999
+        var isUnlocked by mutableStateOf(false)
     }
 
-    private var isUnlocked by mutableStateOf(false)
     private var pausedAtTime = 0L
     private var isShowingAd = false
     private var isValidNetwork by mutableStateOf(true)
@@ -182,20 +182,13 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         return storages
     }
 
-    override fun onSaveInstanceState(outState: Bundle) {
-        super.onSaveInstanceState(outState)
-        outState.putBoolean("isUnlocked", isUnlocked)
-        pausedAtTime = -1L
-    }
-
     @SuppressLint("ObsoleteSdkInt")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
-        if (savedInstanceState != null) {
-            isUnlocked = savedInstanceState.getBoolean("isUnlocked", false)
+        if (savedInstanceState == null) {
+            isUnlocked = false
         }
-
+        enableEdgeToEdge()
         isPending = false
         isDiscoveryOn = isServiceRunning()
         WebDAVService.loadPaths(this)  // always restore saved state
@@ -483,7 +476,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 
     override fun onPause() {
         super.onPause()
-        if (!isShowingAd) {
+        if (!isShowingAd && !isChangingConfigurations) {
             pausedAtTime = System.currentTimeMillis()
         }
     }
