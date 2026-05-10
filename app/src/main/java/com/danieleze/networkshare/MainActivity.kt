@@ -1751,9 +1751,6 @@ fun FilePickerSection(
 
     val handleBack = {
         scope.launch {
-            isExiting = true
-            delay(220)
-            isExiting = false
             if (currentPath == null) {
                 if (WebDAVService.isRunning) {
                     val intent = Intent(context, WebDAVService::class.java).apply {
@@ -1763,6 +1760,9 @@ fun FilePickerSection(
                 }
                 onBack()
             } else {
+                isExiting = true
+                delay(220)
+                isExiting = false
                 val storages = activity.getAvailableStorages()
                 currentPath = if (storages.any { it.absolutePath == currentPath?.absolutePath }) {
                     null
