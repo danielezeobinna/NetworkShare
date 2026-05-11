@@ -28,6 +28,7 @@ class WebDAVService : Service(), TransferListener {
     private var currentSsid: String = ""
     private var wakeLock: android.os.PowerManager.WakeLock? = null
     private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
+    private var wifiJustEnabled = false
     private var networkCallback: android.net.ConnectivityManager.NetworkCallback? = null
     private val activeServers = mutableListOf<WebDAVServer>()
     private val channelId = "WebDAV_Service_Channel"
@@ -61,7 +62,8 @@ class WebDAVService : Service(), TransferListener {
             // This handles WiFi toggle
             if (action == android.net.wifi.WifiManager.WIFI_STATE_CHANGED_ACTION) {
                 val state = intent.getIntExtra(android.net.wifi.WifiManager.EXTRA_WIFI_STATE, 1)
-                if (state == android.net.wifi.WifiManager.WIFI_STATE_ENABLED) {  // ← add this
+                if (state == android.net.wifi.WifiManager.WIFI_STATE_ENABLED) {
+                    wifiJustEnabled = true
                     android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                         startWebDAVServers()
                     }, 1500)
@@ -595,9 +597,12 @@ class WebDAVService : Service(), TransferListener {
 
         when {
             ssid.isBlank() || ssid == "<unknown ssid>" -> {
-                val locationIntent = Intent("com.danieleze.networkshare.CHECK_LOCATION")
-                locationIntent.setPackage(packageName)
-                sendBroadcast(locationIntent)
+                if (wifiJustEnabled) {
+                    val locationIntent = Intent("com.danieleze.networkshare.CHECK_LOCATION")
+                    locationIntent.setPackage(packageName)
+                    sendBroadcast(locationIntent)
+                    wifiJustEnabled = false
+                }
                 isNetworkTrusted.value = false
                 networkState.value = NetworkState.NO_NETWORK
                 if (activeServers.isNotEmpty()) {
