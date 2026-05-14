@@ -12,6 +12,45 @@ import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.min
 import kotlin.text.Charsets
+import androidx.core.content.edit
+
+private object PersistenceGuard {
+    private const val PREFS_NAME = "webdav_safety_prefs"
+    private const val KEY_PREFIX_VERIFIED = "verified_"
+    private const val KEY_PREFIX_TIME = "time_"
+
+    fun markStarted(context: Context, path: String) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit {
+            putBoolean(KEY_PREFIX_VERIFIED + path, false)
+            putLong(KEY_PREFIX_TIME + path, System.currentTimeMillis())
+        }
+    }
+
+    fun isSafeToDelete(context: Context, path: String): Boolean {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val isVerified = prefs.getBoolean(KEY_PREFIX_VERIFIED + path, false)
+        val lastTime = prefs.getLong(KEY_PREFIX_TIME + path, 0L)
+
+        if (lastTime == 0L) return true
+
+        val isExpired = (System.currentTimeMillis() - lastTime) > 60000
+        return isVerified || isExpired
+    }
+
+    fun clear(context: Context, path: String) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit {
+            remove(KEY_PREFIX_VERIFIED + path)
+            remove(KEY_PREFIX_TIME + path)
+        }
+    }
+
+    // Force clears the lock regardless of timer — only use for failed/0-byte uploads
+    fun forceRelease(context: Context, path: String) {
+        clear(context, path)
+    }
+}
 
 // ─────────────────────────────────────────────────────────────
 //  Digest Auth Manager (embedded)
@@ -479,7 +518,7 @@ class WebDAVServer(
     private fun handlePut(session: IHTTPSession, target: File): Response {
         val tempFile   = File(target.parentFile, ".~${target.name}.${UUID.randomUUID()}.tmp")
         val sessionKey = "${session.remoteIpAddress}|${session.headers["user-agent"]}"
-        val isReplace  = target.exists()
+        val isReplace = target.exists() && target.length() > 0L
 
         if (isReplace && !PersistenceGuard.isSafeToDelete(context, target.absolutePath)) {
             Log.w(tag, "Safety Lock Active: Blocking PUT (replace) for ${target.name}")
@@ -528,10 +567,14 @@ class WebDAVServer(
             if (tempFile.length() == contentLength || (contentLength == 0L && !isReplace)) {
                 if (target.exists()) target.delete()
                 if (tempFile.renameTo(target)) {
-                    // Upload fully completed — safe to delete now (clear any lock).
                     if (isReplace) PersistenceGuard.clear(context, target.absolutePath)
                     newFixedLengthResponse(Response.Status.CREATED, MIME_PLAINTEXT, "")
                 } else {
+                    tempFile.delete()
+                    if (target.exists() && target.length() == 0L) {
+                        PersistenceGuard.forceRelease(context, target.absolutePath)
+                        target.delete()
+                    }
                     throw IOException("Failed to move temp file to destination")
                 }
             } else {
@@ -542,7 +585,10 @@ class WebDAVServer(
 
         } catch (e: Exception) {
             if (tempFile.exists()) tempFile.delete()
-            // Lock intentionally NOT cleared — protects original on unexpected failure.
+            if (target.exists() && target.length() == 0L) {
+                PersistenceGuard.forceRelease(context, target.absolutePath)
+                target.delete()
+            }
             newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, e.message)
         } finally {
             DigestAuthManager.resumeTimer(sessionKey)

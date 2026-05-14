@@ -1,6 +1,7 @@
 package com.danieleze.networkshare
 
 import android.Manifest
+import android.content.ClipData
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.BroadcastReceiver
@@ -2638,5 +2639,147 @@ fun Modifier.draggableScrollbar(
                 }
             }
         )
+    }
+}
+
+class CopyFileAddressActivity : Activity() {
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        WebDAVService.loadPaths(this)
+        handleIntent(intent)
+        finish()
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_SEND || intent.type == null) {
+            toast("Unsupported share type")
+            return
+        }
+
+        val uri = androidx.core.content.IntentCompat.getParcelableExtra(
+            intent, Intent.EXTRA_STREAM, android.net.Uri::class.java
+        ) ?: run {
+            toast("No file found in share")
+            return
+        }
+
+        if (!WebDAVService.isRunning) {
+            toast("NetworkShare is not running. Turn it on first.")
+            return
+        }
+
+        val realPath = resolveRealPath(uri) ?: run {
+            toast("Could not resolve file path. Try sharing from a different file manager.")
+            return
+        }
+
+        val url = buildUrl(realPath) ?: run {
+            toast("This file is not in a shared folder.\nAdd its folder in Choose Shared Paths first.")
+            return
+        }
+
+        val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        clipboard.setPrimaryClip(
+            ClipData.newPlainText("File Address", url)
+        )
+        toast("File address copied!")
+    }
+
+    private fun resolveRealPath(uri: android.net.Uri): String? {
+        // Method 1: document URI (most file managers on Android 8+)
+        if (uri.scheme == "content") {
+            try {
+                val docId = android.provider.DocumentsContract.getDocumentId(uri)
+                if (docId.startsWith("primary:")) {
+                    return "${Environment.getExternalStorageDirectory()}/${docId.removePrefix("primary:")}"
+                }
+                if (docId.contains(":")) {
+                    val parts = docId.split(":", limit = 2)
+                    return "/storage/${parts[0]}/${parts[1]}"
+                }
+            } catch (_: Exception) {}
+
+            // Method 2: _data column fallback (works on most Android 8-13 devices)
+            try {
+                contentResolver.query(uri, arrayOf("_data"), null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val index = cursor.getColumnIndex("_data")
+                        if (index != -1) {
+                            val path = cursor.getString(index)
+                            if (!path.isNullOrBlank()) return path
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        // Method 3: file URI (some older apps still send these)
+        if (uri.scheme == "file") {
+            return uri.path
+        }
+
+        return null
+    }
+
+    private fun buildUrl(realPath: String): String? {
+        // Check the file is inside a shared folder
+        val isShared = WebDAVService.selectedPaths.any { shared ->
+            realPath == shared || realPath.startsWith("$shared/")
+        }
+        if (!isShared) return null
+
+        // Find the storage root for this path
+        val externalDirs = getExternalFilesDirs(null)
+        val root = externalDirs.filterNotNull().mapNotNull { dir ->
+            val path = dir.absolutePath
+            if (path.contains("/Android/")) path.split("/Android/")[0] else path
+        }.map { File(it) }.firstOrNull { root ->
+            realPath.startsWith(root.absolutePath)
+        } ?: return null
+
+        val ip = getLocalIp() ?: return null
+        val port = getPortForRoot(root.absolutePath) ?: return null
+
+        val relative = realPath
+            .removePrefix(root.absolutePath)
+            .trimStart('/')
+            .split("/")
+            .joinToString("/") { java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
+
+        return "http://$ip:$port/$relative"
+    }
+
+    private fun getLocalIp(): String? {
+        return try {
+            java.net.NetworkInterface.getNetworkInterfaces().toList()
+                .filter { it.isUp && !it.isLoopback }
+                .flatMap { it.inetAddresses.toList() }
+                .filterIsInstance<java.net.Inet4Address>()
+                .firstOrNull { !it.isLoopbackAddress }
+                ?.hostAddress
+        } catch (_: Exception) { null }
+    }
+
+    private fun getPortForRoot(rootPath: String): Int? {
+        val externalDirs = getExternalFilesDirs(null)
+        val roots = externalDirs.filterNotNull().mapNotNull { dir ->
+            val path = dir.absolutePath
+            if (path.contains("/Android/")) path.split("/Android/")[0] else path
+        }.distinct()
+
+        var port = 8080
+        for (root in roots) {
+            val hasShared = WebDAVService.selectedPaths.any { it.startsWith(root) }
+            if (hasShared) {
+                if (root == rootPath) return port
+                port++
+            }
+        }
+        return null
+    }
+
+    private fun toast(msg: String) {
+        Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
     }
 }

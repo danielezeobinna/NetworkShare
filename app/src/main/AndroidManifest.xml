@@ -46,6 +46,18 @@
             android:stopWithTask="false" />
 
         <activity
+            android:name=".CopyFileAddressActivity"
+            android:label="Copy File Address"
+            android:theme="@android:style/Theme.NoDisplay"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+        </activity>
+
+        <activity
             android:name=".MainActivity"
             android:launchMode="singleTask"
             android:documentLaunchMode="never"
