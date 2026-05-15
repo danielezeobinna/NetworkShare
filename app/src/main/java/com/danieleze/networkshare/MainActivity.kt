@@ -129,6 +129,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     private var serverAddresses by mutableStateOf("")
     private var isDiscoveryOn by mutableStateOf(false)  // will be set in onCreate
     private var isPending by mutableStateOf(false)
+    private var showNetworkDialog by mutableStateOf(false)
     private var showUnknownNetworkDialog by mutableStateOf(false)
     private var showNotificationDialog by mutableStateOf(false)
     private var interstitialAd: InterstitialAd? = null
@@ -276,6 +277,12 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                                 onDismiss = { showNotificationDialog = false }
                                             )
 
+                                            NoNetworkDialog(
+                                                show = showNetworkDialog,
+                                                appTheme = appTheme,
+                                                onDismiss = { showNetworkDialog = false }
+                                            )
+
                                             val screenState = when {
                                                 showUserGuide.value -> "userGuide"
                                                 showAllowedNetworks.value -> "allowedNetworks"
@@ -327,6 +334,8 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                                                 startService(svcIntent)
                                                             }
                                                         },
+                                                        onNoNetwork = { showNetworkDialog = true },
+                                                        onDismissNetworkDialog = { showNetworkDialog = false },
                                                         onOpenPicker = { navigatingForward = true; isPickerOpen.value = true },
                                                         onOpenAllowedNetworks = { navigatingForward = true; showAllowedNetworks.value = true },
                                                         onOpenBlockedNetworks = { navigatingForward = true; showBlockedNetworks.value = true },
@@ -855,6 +864,8 @@ fun DiscoveryScreen(
     onToggle: (Boolean) -> Unit,
     onReload: () -> Unit,
     onOpenPicker: () -> Unit,
+    onNoNetwork: () -> Unit,
+    onDismissNetworkDialog: () -> Unit,
     onOpenAllowedNetworks: () -> Unit,
     onOpenBlockedNetworks: () -> Unit,
     onThemeChange: (AppTheme) -> Unit,
@@ -883,7 +894,6 @@ fun DiscoveryScreen(
     val hasChanged = WebDAVService.username.value != originalUsername ||
             WebDAVService.password.value != originalPassword
 
-    var showNetworkDialog by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
     var themeExpanded by remember { mutableStateOf(false) }
     val themeRotation by animateFloatAsState(
@@ -1052,7 +1062,7 @@ fun DiscoveryScreen(
                     when {
                         // State 1 — service is off
                         !isOn -> {
-                            showNetworkDialog = false
+                            onDismissNetworkDialog()
                             Column(
                                 modifier = Modifier
                                     .padding(16.dp)
@@ -1069,7 +1079,7 @@ fun DiscoveryScreen(
 
                         // State 2 — no paths selected
                         noPaths -> {
-                            showNetworkDialog = false
+                            onDismissNetworkDialog()
                             Column(
                                 modifier = Modifier
                                     .padding(16.dp)
@@ -1088,7 +1098,7 @@ fun DiscoveryScreen(
                         isOn && networkState == NetworkState.NO_NETWORK -> {
                             LaunchedEffect(Unit) {
                                 delay(2000L)
-                                showNetworkDialog = true
+                                onNoNetwork()
                             }
                             Column(
                                 modifier = Modifier
@@ -1106,7 +1116,7 @@ fun DiscoveryScreen(
 
                         // State 4 — service on, trusted network
                         isOn && networkState == NetworkState.TRUSTED -> {
-                            showNetworkDialog = false
+                            onDismissNetworkDialog()
                             SelectionContainer {
                                 LazyColumn(
                                     state = listState,
@@ -1134,7 +1144,7 @@ fun DiscoveryScreen(
 
                         // State 5 — service on, untrusted/pending
                         else -> {
-                            showNetworkDialog = false
+                            onDismissNetworkDialog()
                             Column(
                                 modifier = Modifier
                                     .padding(16.dp)
@@ -1464,122 +1474,6 @@ fun DiscoveryScreen(
                                 color = MaterialTheme.colorScheme.onSurface,
                                 fontSize = 16.sp
                             )
-                        }
-                    }
-                }
-
-                if (showNetworkDialog) {
-                    Dialog(
-                        onDismissRequest = { showNetworkDialog = false },
-                        properties = DialogProperties(
-                            usePlatformDefaultWidth = false,
-                            dismissOnBackPress = true,
-                            dismissOnClickOutside = true
-                        )
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize(0.98f)
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null
-                                ) { showNetworkDialog = false },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Surface(
-                                modifier = Modifier
-                                    .offset(y = (-24).dp)
-                                    .fillMaxWidth(0.95f)
-                                    .padding(horizontal = 4.dp),
-                                shape = RoundedCornerShape(28.dp),
-                                color = if (isDark) Color(0xFF252525) else Color(0xFFFCFCFC),
-                                tonalElevation = 6.dp
-                            ) {
-                                Column(
-                                    modifier = Modifier.padding(24.dp),
-                                    horizontalAlignment = Alignment.Start
-                                ) {
-                                    Text(
-                                        text = "No Network Detected",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 20.sp,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-
-                                    Spacer(modifier = Modifier.height(16.dp))
-
-                                    Text(
-                                        text = "Network sharing is only possible when your device is part of a network. Join a Wi-Fi network or create a network using hotspot.",
-                                        fontSize = 16.sp,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-
-                                    Spacer(modifier = Modifier.height(24.dp))
-
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        // LEFT BUTTON (Hotspot)
-                                        TextButton(
-                                            onClick = {
-                                                showNetworkDialog = false
-                                                WebDAVService.isWaitingForHotspot = true  // ← simpler, no cast needed
-                                                val intent = Intent("android.settings.TETHER_SETTINGS").apply {
-                                                    addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY)
-                                                }
-                                                try {
-                                                    context.startActivity(intent)
-                                                } catch (_: Exception) {
-                                                    context.startActivity(
-                                                        Intent(Settings.ACTION_WIRELESS_SETTINGS).apply {
-                                                            addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY)
-                                                        }
-                                                    )
-                                                }
-                                            },
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                // We use clickable here to force the custom ripple color
-                                                .clickable(
-                                                    interactionSource = remember { MutableInteractionSource() },
-                                                    onClick = { /* This is handled by the TextButton's onClick */ }
-                                                )
-                                        ) {
-                                            Text("Hotspot", color = Color(0xFF2BAED5), fontSize = 16.sp)
-                                        }
-
-                                        // THE DIVIDER LINE (The subtle line you wanted)
-                                        VerticalDivider(
-                                            modifier = Modifier
-                                                .height(20.dp)
-                                                .width(1.dp),
-                                            color = Color.Gray.copy(alpha = 0.2f)
-                                        )
-
-                                        // RIGHT BUTTON (Wi-Fi)
-                                        TextButton(
-                                            onClick = {
-                                                showNetworkDialog = false
-                                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                                    context.startActivity(Intent("android.settings.panel.action.WIFI"))
-                                                } else {
-                                                    context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
-                                                }
-                                            },
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .clickable(
-                                                    interactionSource = remember { MutableInteractionSource() },
-                                                    onClick = { /* This is handled by the TextButton's onClick */ }
-                                                )
-                                        ) {
-                                            Text("Wi-Fi", color = Color(0xFF2BAED5), fontSize = 16.sp)
-                                        }
-                                    }
-                                }
-                            }
                         }
                     }
                 }
@@ -2269,11 +2163,12 @@ fun NetworkListScreen(
                         contentPadding = PaddingValues(horizontal = 24.dp, vertical = 32.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        items(networks, key = { it }) { ssid ->
+                        itemsIndexed(networks, key = { _, ssid -> ssid }) { index, ssid ->
                             NetworkRow(
                                 ssid = ssid,
                                 iconRes = iconRes,
                                 isLast = ssid == networks.last(),
+                                index = index,
                                 onRemove = { onRemove(ssid) }
                             )
                         }
@@ -2289,58 +2184,101 @@ fun NetworkRow(
     ssid: String,
     iconRes: Int,
     isLast: Boolean = false,
+    index: Int = 0,
     onRemove: () -> Unit
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            painter = painterResource(id = iconRes),
-            tint = Color(0xFF2BAED5),
-            contentDescription = null,
-            modifier = Modifier
-                .size(28.dp)
-                .offset(y = (-4).dp)
-        )
+    var visible by remember { mutableStateOf(false) }
+    var removing by remember { mutableStateOf(false) }
 
-        Spacer(modifier = Modifier.width(16.dp))
+    // Fade in on appearance, staggered by index
+    LaunchedEffect(Unit) {
+        delay(index * 40L)
+        visible = true
+    }
 
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .padding(end = 8.dp)
-        ) {
-            Text(
-                text = ssid,
-                color = MaterialTheme.colorScheme.onSurface,
-                fontSize = 16.sp
-            )
-            if (!isLast) {
-                HorizontalDivider(
-                    modifier = Modifier
-                        .offset(y = 4.dp)
-                        .padding(top = 8.dp),
-                    thickness = 0.5.dp,
-                    color = Color.Gray.copy(alpha = 0.3f)
-                )
-            }
+    val effectiveVisible = visible && !removing
+
+    val offsetX by animateFloatAsState(
+        targetValue = if (effectiveVisible) 0f else 40f,
+        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+        label = "slideX"
+    )
+    val alpha by animateFloatAsState(
+        targetValue = if (effectiveVisible) 1f else 0f,
+        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+        label = "fade"
+    )
+
+    // Animate height collapse after fade out completes
+    var collapsed by remember { mutableStateOf(false) }
+
+    LaunchedEffect(removing) {
+        if (removing) {
+            delay(240) // wait for fade out to finish
+            collapsed = true
+            onRemove()
         }
+    }
 
-        IconButton(
-            onClick = onRemove,
+    AnimatedVisibility(
+        visible = !collapsed,
+        exit = shrinkVertically(animationSpec = tween(durationMillis = 200))
+    ) {
+        Row(
             modifier = Modifier
-                .size(28.dp)
-                .offset(y = (-4).dp)
+                .fillMaxWidth()
+                .graphicsLayer {
+                    translationX = offsetX.dp.toPx()
+                    this.alpha = alpha
+                }
+                .padding(vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
-                painter = painterResource(id = R.drawable.baseline_close),
-                contentDescription = "Remove",
-                tint = Color.Gray,
-                modifier = Modifier.size(18.dp)
+                painter = painterResource(id = iconRes),
+                tint = Color(0xFF2BAED5),
+                contentDescription = null,
+                modifier = Modifier
+                    .size(28.dp)
+                    .offset(y = (-4).dp)
             )
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = 8.dp)
+            ) {
+                Text(
+                    text = ssid,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = 16.sp
+                )
+                if (!isLast) {
+                    HorizontalDivider(
+                        modifier = Modifier
+                            .offset(y = 4.dp)
+                            .padding(top = 8.dp),
+                        thickness = 0.5.dp,
+                        color = Color.Gray.copy(alpha = 0.3f)
+                    )
+                }
+            }
+
+            IconButton(
+                onClick = { removing = true },
+                modifier = Modifier
+                    .size(28.dp)
+                    .offset(y = (-4).dp)
+            ) {
+                Icon(
+                    painter = painterResource(id = R.drawable.baseline_close),
+                    contentDescription = "Remove",
+                    tint = Color.Gray,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
         }
     }
 }
@@ -2496,6 +2434,112 @@ fun UnknownNetworkDialog(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text("Block", color = Color(0xFF2BAED5), fontSize = 16.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun NoNetworkDialog(
+    show: Boolean,
+    appTheme: AppTheme,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    if (!show) return
+    val isDark = when (appTheme) {
+        AppTheme.LIGHT -> false
+        AppTheme.DARK -> true
+        AppTheme.SYSTEM -> isSystemInDarkTheme()
+    }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true
+        )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize(0.98f)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { onDismiss() },
+            contentAlignment = Alignment.Center
+        ) {
+            Surface(
+                modifier = Modifier
+                    .offset(y = (-24).dp)
+                    .fillMaxWidth(0.95f)
+                    .padding(horizontal = 4.dp),
+                shape = RoundedCornerShape(28.dp),
+                color = if (isDark) Color(0xFF252525) else Color(0xFFFCFCFC),
+                tonalElevation = 6.dp
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.Start
+                ) {
+                    Text(
+                        text = "No Network Detected",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 20.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "Network sharing is only possible when your device is part of a network. Join a Wi-Fi network or create a network using hotspot.",
+                        fontSize = 16.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(
+                            onClick = {
+                                onDismiss()
+                                WebDAVService.isWaitingForHotspot = true
+                                val intent = Intent("android.settings.TETHER_SETTINGS").apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY)
+                                }
+                                try {
+                                    context.startActivity(intent)
+                                } catch (_: Exception) {
+                                    context.startActivity(
+                                        Intent(Settings.ACTION_WIRELESS_SETTINGS).apply {
+                                            addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY)
+                                        }
+                                    )
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Hotspot", color = Color(0xFF2BAED5), fontSize = 16.sp)
+                        }
+                        VerticalDivider(
+                            modifier = Modifier.height(20.dp).width(1.dp),
+                            color = Color.Gray.copy(alpha = 0.2f)
+                        )
+                        TextButton(
+                            onClick = {
+                                onDismiss()
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                    context.startActivity(Intent("android.settings.panel.action.WIFI"))
+                                } else {
+                                    context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Wi-Fi", color = Color(0xFF2BAED5), fontSize = 16.sp)
                         }
                     }
                 }
