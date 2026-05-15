@@ -282,10 +282,16 @@ class WebDAVServer(
             val sessionKey = "${session.remoteIpAddress}|${session.headers["user-agent"]}"
             val authHeader = session.headers["authorization"] ?: ""
 
+            // Token bypass — read-only operations only (streaming/download via URL)
+            val tokenParam = session.parameters["token"]?.firstOrNull()
+            val isValidToken = !tokenParam.isNullOrBlank() &&
+                    tokenParam == WebDAVService.generateToken()
+            val isReadOnly = session.method == Method.GET ||
+                    session.method == Method.HEAD
+
             val isAuthenticated = when {
-                // 1. Session is already cached (covers LOCK after prior auth)
+                isValidToken && isReadOnly -> true
                 DigestAuthManager.isSessionCached(sessionKey) -> true
-                // 2. Fresh valid digest credentials in this request
                 authHeader.isNotEmpty() && DigestAuthManager.validateAuthorization(authHeader, session.method.name) -> {
                     DigestAuthManager.cacheSession(sessionKey)
                     true

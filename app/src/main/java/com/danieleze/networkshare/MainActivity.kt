@@ -2747,7 +2747,12 @@ class CopyFileAddressActivity : Activity() {
             .split("/")
             .joinToString("/") { java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
 
-        return "http://$ip:$port/$relative"
+        return if (WebDAVService.isAuthEnabled.value) {
+            val token = WebDAVService.generateToken()
+            "http://$ip:$port/$relative?token=$token"
+        } else {
+            "http://$ip:$port/$relative"
+        }
     }
 
     private fun getLocalIp(): String? {

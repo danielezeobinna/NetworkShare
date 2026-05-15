@@ -711,6 +711,11 @@ class WebDAVService : Service(), TransferListener {
         var pendingTrustSsid = mutableStateOf<String?>(null)
         var username = mutableStateOf("user")
         var password = mutableStateOf("pass")
+        var scannedItems = mutableStateListOf<FolderItem>()
+        var isScanning = mutableStateOf(false)
+        var selectedPaths = mutableStateListOf<String>()
+        var tempPriorityPath: String? = null
+
         private val cancelledFiles = Collections.synchronizedSet(mutableSetOf<String>())
 
         fun cancelTransfer(fileName: String) {
@@ -724,10 +729,13 @@ class WebDAVService : Service(), TransferListener {
         fun clearCancel(fileName: String) {
             cancelledFiles.remove(fileName)
         }
-        var scannedItems = mutableStateListOf<FolderItem>()
-        var isScanning = mutableStateOf(false)
-        var selectedPaths = mutableStateListOf<String>()
-        var tempPriorityPath: String? = null
+
+        fun generateToken(): String {
+            val input = "${username.value}:${password.value}:NetworkShare"
+            return java.security.MessageDigest.getInstance("MD5")
+                .digest(input.toByteArray())
+                .joinToString("") { "%02x".format(it) }
+        }
 
         fun savePaths(context: Context) {
             val prefs = context.getSharedPreferences("network_share_prefs", MODE_PRIVATE)
