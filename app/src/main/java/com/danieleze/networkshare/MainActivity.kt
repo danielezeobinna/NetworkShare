@@ -127,8 +127,9 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     private var isShowingAd = false
     private var isValidNetwork by mutableStateOf(true)
     private var serverAddresses by mutableStateOf("")
-    private var isDiscoveryOn by mutableStateOf(false)  // will be set in onCreate
+    private var isDiscoveryOn by mutableStateOf(false)
     private var isPending by mutableStateOf(false)
+    private var showLocationOffDialog by mutableStateOf(false)
     private var showNetworkDialog by mutableStateOf(false)
     private var showUnknownNetworkDialog by mutableStateOf(false)
     private var showNotificationDialog by mutableStateOf(false)
@@ -263,6 +264,12 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                             LaunchedEffect(pendingTrustSsid) {
                                                 if (pendingTrustSsid != null && isDiscoveryOn) showUnknownNetworkDialog = true
                                             }
+
+                                            LocationOffDialog(
+                                                show = showLocationOffDialog,
+                                                appTheme = appTheme,
+                                                onDismiss = { showLocationOffDialog = false }
+                                            )
 
                                             UnknownNetworkDialog(
                                                 show = showUnknownNetworkDialog,
@@ -735,9 +742,15 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 
     fun checkLocationForUntrustedNetwork() {
         if (!hasLocationPermission()) {
-            // Don't stop the service — just request the permission.
-            // The service will re-evaluate trust when the callback returns.
             requestLocationPermissions()
+            return
+        }
+        val locationManager = getSystemService(LOCATION_SERVICE) as android.location.LocationManager
+        val isLocationOn = locationManager.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER)
+                || locationManager.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER)
+
+        if (!isLocationOn) {
+            showLocationOffDialog = true
         }
     }
 
@@ -2339,6 +2352,86 @@ fun UserGuideScreen(onBack: () -> Unit) {
                     color = Color.Gray,
                     fontSize = 15.sp
                 )
+            }
+        }
+    }
+}
+
+@Composable
+fun LocationOffDialog(
+    show: Boolean,
+    appTheme: AppTheme,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    if (!show) return
+    val isDark = when (appTheme) {
+        AppTheme.LIGHT -> false
+        AppTheme.DARK -> true
+        AppTheme.SYSTEM -> isSystemInDarkTheme()
+    }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true
+        )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize(0.98f)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { onDismiss() },
+            contentAlignment = Alignment.Center
+        ) {
+            Surface(
+                modifier = Modifier
+                    .offset(y = (-24).dp)
+                    .fillMaxWidth(0.95f)
+                    .padding(horizontal = 4.dp),
+                shape = RoundedCornerShape(28.dp),
+                color = if (isDark) Color(0xFF252525) else Color(0xFFFCFCFC),
+                tonalElevation = 6.dp
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.Start
+                ) {
+                    Text(
+                        text = "Location Is Off",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 20.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "Android requires location to be turned on to detect your Wi-Fi network name. Please enable location to continue sharing.",
+                        fontSize = 16.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(24.dp))
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                        thickness = 0.5.dp,
+                        color = Color.Gray.copy(alpha = 0.2f)
+                    )
+                    TextButton(
+                        onClick = {
+                            onDismiss()
+                            context.startActivity(
+                                Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS).apply {
+                                    addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY)
+                                }
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Open Settings", color = Color(0xFF2BAED5), fontSize = 18.sp)
+                    }
+                }
             }
         }
     }
