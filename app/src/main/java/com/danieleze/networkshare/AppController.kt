@@ -3,6 +3,7 @@ package com.danieleze.networkshare
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.ClipData
 import android.content.Context
@@ -11,6 +12,7 @@ import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.IBinder
 import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
@@ -52,24 +54,29 @@ abstract class AppController : androidx.fragment.app.FragmentActivity() {
     companion object {
         private const val REQ_PIN = 9999
         var isUnlocked by mutableStateOf(false)
+        var instance: AppController? = null
     }
 
     // ── State exposed to the UI ───────────────────────────────────────────────
-    var isValidNetwork   by mutableStateOf(true)    ; protected set
-    var serverAddresses  by mutableStateOf("")       ; protected set
-    var isDiscoveryOn    by mutableStateOf(false)    ; protected set
-    var isPending        by mutableStateOf(false)    ; protected set
-    var appTheme         by mutableStateOf(AppTheme.SYSTEM) ; protected set
+    var isValidNetwork by mutableStateOf(true); protected set
+    var serverAddresses by mutableStateOf(""); protected set
+    var isDiscoveryOn by mutableStateOf(false); protected set
+    var isPending by mutableStateOf(false); protected set
+    var appTheme by mutableStateOf(AppTheme.SYSTEM); protected set
 
     // Dialog triggers (UI reads these; AppController writes them)
-    var showLocationOffDialog      by mutableStateOf(false)
-    var showNetworkDialog          by mutableStateOf(false)
-    var showUnknownNetworkDialog   by mutableStateOf(false)
-    var showNotificationDialog     by mutableStateOf(false)
+    var showLocationOffDialog by mutableStateOf(false)
+    var showNetworkDialog by mutableStateOf(false)
+    var showUnknownNetworkDialog by mutableStateOf(false)
+    var showNotificationDialog by mutableStateOf(false)
+
+    var pendingNotificationCheck = false
+    var pendingLocationCheck = false
+    var pendingStorageCheck = false
 
     // ── Private fields ────────────────────────────────────────────────────────
-    private var pausedAtTime  = 0L
-    private var isShowingAd   = false
+    private var pausedAtTime = 0L
+    private var isShowingAd = false
     private var interstitialAd: InterstitialAd? = null
 
     // ── Permission launcher ───────────────────────────────────────────────────
@@ -86,15 +93,17 @@ abstract class AppController : androidx.fragment.app.FragmentActivity() {
                 "com.danieleze.networkshare.SERVER_STOPPED" -> {
                     isDiscoveryOn = false
                 }
+
                 "com.danieleze.networkshare.CHECK_LOCATION" -> {
                     checkLocationForUntrustedNetwork()
                 }
+
                 "com.danieleze.networkshare.ADDRESSES_UPDATED" -> {
-                    val data         = intent.getStringExtra("address_list")
+                    val data = intent.getStringExtra("address_list")
                     val validNetwork = intent.getBooleanExtra("is_valid_network", true)
                     if (data != null) {
                         serverAddresses = data
-                        isValidNetwork  = validNetwork
+                        isValidNetwork = validNetwork
                         saveAddresses(data)
                     }
                 }
@@ -107,7 +116,7 @@ abstract class AppController : androidx.fragment.app.FragmentActivity() {
         val storages = mutableListOf<File>()
         getExternalFilesDirs(null).forEach { dir ->
             if (dir != null) {
-                val path     = dir.absolutePath
+                val path = dir.absolutePath
                 val rootPath = if (path.contains("/Android/")) path.split("/Android/")[0] else path
                 val rootFile = File(rootPath)
                 if (rootFile.exists() && rootFile.canRead() && !storages.contains(rootFile)) {
@@ -122,10 +131,13 @@ abstract class AppController : androidx.fragment.app.FragmentActivity() {
     @SuppressLint("ObsoleteSdkInt")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        instance = this
+        Log.d("AppController", "STARTED — app opened")
+        startService(Intent(this, AppControllerService::class.java))
 
         if (savedInstanceState == null) isUnlocked = false
 
-        isPending     = false
+        isPending = false
         isDiscoveryOn = isServiceRunning()
         WebDAVService.loadPaths(this)
 
@@ -155,7 +167,10 @@ abstract class AppController : androidx.fragment.app.FragmentActivity() {
 
     override fun onStop() {
         super.onStop()
-        try { unregisterReceiver(receiver) } catch (_: Exception) {}
+        try {
+            unregisterReceiver(receiver)
+        } catch (_: Exception) {
+        }
     }
 
     override fun onResume() {
@@ -215,11 +230,22 @@ abstract class AppController : androidx.fragment.app.FragmentActivity() {
             if (!granted) {
                 stopService(Intent(this, WebDAVService::class.java))
                 isDiscoveryOn = false
-                Toast.makeText(this, "Storage permission is required to use NetworkShare", Toast.LENGTH_LONG).show()
+                Toast.makeText(
+                    this,
+                    "Storage permission is required to use NetworkShare",
+                    Toast.LENGTH_LONG
+                ).show()
             } else {
                 isUnlocked = true
             }
         }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        instance = null
+        Log.d("AppController", "STOPPED — app closed")
+        stopService(Intent(this, AppControllerService::class.java))
     }
 
     // ── Authentication ────────────────────────────────────────────────────────
@@ -228,7 +254,9 @@ abstract class AppController : androidx.fragment.app.FragmentActivity() {
         val km = getSystemService(KEYGUARD_SERVICE) as android.app.KeyguardManager
         val biometricManager = BiometricManager.from(this)
 
-        if (!km.isDeviceSecure) { initPermissions(); return }
+        if (!km.isDeviceSecure) {
+            initPermissions(); return
+        }
 
         val launchLegacyPin = {
             @Suppress("DEPRECATION")
@@ -240,23 +268,30 @@ abstract class AppController : androidx.fragment.app.FragmentActivity() {
             BiometricManager.Authenticators.BIOMETRIC_STRONG
         ) == BiometricManager.BIOMETRIC_SUCCESS
 
-        if (!canUseBiometrics) { launchLegacyPin(); return }
+        if (!canUseBiometrics) {
+            launchLegacyPin(); return
+        }
 
         val executor = ContextCompat.getMainExecutor(this)
-        val biometricPrompt = BiometricPrompt(this, executor,
+        val biometricPrompt = BiometricPrompt(
+            this, executor,
             object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                     super.onAuthenticationSucceeded(result)
                     initPermissions()
                 }
+
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
                     super.onAuthenticationError(errorCode, errString)
                     when (errorCode) {
                         BiometricPrompt.ERROR_NEGATIVE_BUTTON,
                         BiometricPrompt.ERROR_LOCKOUT,
                         BiometricPrompt.ERROR_LOCKOUT_PERMANENT -> launchLegacyPin()
-                        BiometricPrompt.ERROR_USER_CANCELED     -> { /* let user retry */ }
-                        else                                    -> launchLegacyPin()
+
+                        BiometricPrompt.ERROR_USER_CANCELED -> { /* let user retry */
+                        }
+
+                        else -> launchLegacyPin()
                     }
                 }
             })
@@ -284,7 +319,7 @@ abstract class AppController : androidx.fragment.app.FragmentActivity() {
                 val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
                     data = "package:${applicationContext.packageName}".toUri()
                 }
-                isUnlocked = true
+                pendingStorageCheck = true
                 startActivity(intent)
             } else {
                 isUnlocked = true
@@ -324,6 +359,7 @@ abstract class AppController : androidx.fragment.app.FragmentActivity() {
                     override fun onAdDismissedFullScreenContent() {
                         interstitialAd = null; loadInterstitialAd()
                     }
+
                     override fun onAdFailedToShowFullScreenContent(
                         error: com.google.android.gms.ads.AdError
                     ) {
@@ -341,8 +377,11 @@ abstract class AppController : androidx.fragment.app.FragmentActivity() {
     private fun toggleService(start: Boolean) {
         val intent = Intent(this, WebDAVService::class.java)
         try {
-            if (start) { startForegroundService(intent); isDiscoveryOn = true }
-            else        { stopService(intent);            isDiscoveryOn = false }
+            if (start) {
+                startForegroundService(intent); isDiscoveryOn = true
+            } else {
+                stopService(intent); isDiscoveryOn = false
+            }
         } finally {
             window.decorView.postDelayed({ isPending = false }, 500)
         }
@@ -357,25 +396,31 @@ abstract class AppController : androidx.fragment.app.FragmentActivity() {
 
     // ── Location helpers ──────────────────────────────────────────────────────
     fun hasLocationPermission(): Boolean {
-        val fine   = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
-        val coarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION)
-        return fine   == android.content.pm.PackageManager.PERMISSION_GRANTED ||
-               coarse == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val fine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+        val coarse =
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION)
+        return fine == android.content.pm.PackageManager.PERMISSION_GRANTED ||
+                coarse == android.content.pm.PackageManager.PERMISSION_GRANTED
     }
 
     fun requestLocationPermissions() {
         androidx.core.app.ActivityCompat.requestPermissions(
             this,
-            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
+            arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ),
             101
         )
     }
 
     fun checkLocationForUntrustedNetwork() {
-        if (!hasLocationPermission()) { requestLocationPermissions(); return }
+        if (!hasLocationPermission()) {
+            requestLocationPermissions(); return
+        }
         val lm = getSystemService(LOCATION_SERVICE) as android.location.LocationManager
         val isOn = lm.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER) ||
-                   lm.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER)
+                lm.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER)
         if (!isOn) showLocationOffDialog = true
     }
 
@@ -386,8 +431,13 @@ abstract class AppController : androidx.fragment.app.FragmentActivity() {
             BuildConfig.ADMOB_INTERSTITIAL_ID,
             AdRequest.Builder().build(),
             object : InterstitialAdLoadCallback() {
-                override fun onAdLoaded(ad: InterstitialAd)         { interstitialAd = ad }
-                override fun onAdFailedToLoad(error: LoadAdError)    { interstitialAd = null }
+                override fun onAdLoaded(ad: InterstitialAd) {
+                    interstitialAd = ad
+                }
+
+                override fun onAdFailedToLoad(error: LoadAdError) {
+                    interstitialAd = null
+                }
             }
         )
     }
@@ -410,7 +460,7 @@ abstract class AppController : androidx.fragment.app.FragmentActivity() {
     // ── Incoming share handling ───────────────────────────────────────────────
     fun handleIncomingShare(intent: Intent) {
         val action = intent.action
-        val type   = intent.type
+        val type = intent.type
         if (Intent.ACTION_SEND == action && type != null) {
             val uri = androidx.core.content.IntentCompat.getParcelableExtra(
                 intent, Intent.EXTRA_STREAM, android.net.Uri::class.java
@@ -425,7 +475,7 @@ abstract class AppController : androidx.fragment.app.FragmentActivity() {
 
     private fun saveUriToSharedFolder(uri: android.net.Uri) {
         try {
-            val rootDir         = Environment.getExternalStorageDirectory()
+            val rootDir = Environment.getExternalStorageDirectory()
             val networkShareDir = File(rootDir, "NetworkShare")
 
             if (!networkShareDir.exists()) {
@@ -433,22 +483,32 @@ abstract class AppController : androidx.fragment.app.FragmentActivity() {
                     Log.e("NetworkShare", "Could not create root folder, check permissions")
             }
 
-            val fileName  = getFileName(uri) ?: "shared_${System.currentTimeMillis()}"
+            val fileName = getFileName(uri) ?: "shared_${System.currentTimeMillis()}"
             val extension = fileName.substringAfterLast('.', "").lowercase()
 
             val isDirectory = contentResolver.getType(uri) == "vnd.android.cursor.item/directory"
             val subFolder = when {
-                isDirectory                                                          -> "Folders"
-                extension in listOf("apk", "exe")                                   -> "Apps"
-                extension in listOf("mp3", "wav", "m4a", "flac", "ogg")            -> "Audio"
-                extension in listOf("mp4", "mkv", "mov", "avi", "webm")            -> "Video"
-                extension in listOf("jpg", "jpeg", "png", "gif", "webp", "bmp")    -> "Pictures"
-                extension in listOf("pdf", "doc", "docx", "txt", "xls", "xlsx", "ppt", "pptx") -> "Documents"
-                else                                                                 -> "Others"
+                isDirectory -> "Folders"
+                extension in listOf("apk", "exe") -> "Apps"
+                extension in listOf("mp3", "wav", "m4a", "flac", "ogg") -> "Audio"
+                extension in listOf("mp4", "mkv", "mov", "avi", "webm") -> "Video"
+                extension in listOf("jpg", "jpeg", "png", "gif", "webp", "bmp") -> "Pictures"
+                extension in listOf(
+                    "pdf",
+                    "doc",
+                    "docx",
+                    "txt",
+                    "xls",
+                    "xlsx",
+                    "ppt",
+                    "pptx"
+                ) -> "Documents"
+
+                else -> "Others"
             }
 
             val targetDir = File(networkShareDir, subFolder).also { if (!it.exists()) it.mkdirs() }
-            val destFile  = File(targetDir, fileName)
+            val destFile = File(targetDir, fileName)
 
             contentResolver.openInputStream(uri)?.use { it.copyTo(destFile.outputStream()) }
 
@@ -535,7 +595,8 @@ class CopyFileAddressActivity : Activity() {
                     val parts = docId.split(":", limit = 2)
                     return "/storage/${parts[0]}/${parts[1]}"
                 }
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+            }
             try {
                 contentResolver.query(uri, arrayOf("_data"), null, null, null)?.use { cursor ->
                     if (cursor.moveToFirst()) {
@@ -546,7 +607,8 @@ class CopyFileAddressActivity : Activity() {
                         }
                     }
                 }
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+            }
         }
         if (uri.scheme == "file") return uri.path
         return null
@@ -563,7 +625,7 @@ class CopyFileAddressActivity : Activity() {
             if (path.contains("/Android/")) path.split("/Android/")[0] else path
         }.map { File(it) }.firstOrNull { realPath.startsWith(it.absolutePath) } ?: return null
 
-        val ip   = getLocalIp()              ?: return null
+        val ip = getLocalIp() ?: return null
         val port = getPortForRoot(root.absolutePath) ?: return null
 
         val relative = realPath
@@ -585,7 +647,9 @@ class CopyFileAddressActivity : Activity() {
             .flatMap { it.inetAddresses.toList() }
             .filterIsInstance<java.net.Inet4Address>()
             .firstOrNull { !it.isLoopbackAddress }?.hostAddress
-    } catch (_: Exception) { null }
+    } catch (_: Exception) {
+        null
+    }
 
     private fun getPortForRoot(rootPath: String): Int? {
         val roots = getExternalFilesDirs(null).filterNotNull().mapNotNull { dir ->
@@ -605,4 +669,112 @@ class CopyFileAddressActivity : Activity() {
     }
 
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AppControllerService — background service tied to app lifetime.
+// ─────────────────────────────────────────────────────────────────────────────
+class AppControllerService : Service() {
+
+    companion object {
+        var isRunning = false
+            private set
+    }
+
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    private val heartbeat = object : Runnable {
+        override fun run() {
+            val controller = AppController.instance
+
+            if (controller == null) {
+                Log.d("AppControllerService", "AppController gone — stopping service")
+                stopSelf()
+                return
+            }
+
+            checkPendingPermissions(controller)
+
+            val hasPendingCheck = controller.pendingNotificationCheck ||
+                    controller.pendingLocationCheck ||
+                    controller.pendingStorageCheck
+
+            handler.postDelayed(this, if (hasPendingCheck) 1_000L else 10_000L)
+        }
+    }
+
+    private fun checkPendingPermissions(controller: AppController) {
+
+        // Notification permission
+        if (controller.pendingNotificationCheck) {
+            val notifManager = getSystemService(android.app.NotificationManager::class.java)
+            if (notifManager.areNotificationsEnabled()) {
+                Log.d("AppControllerService", "Notification permission granted — returning to app")
+                controller.pendingNotificationCheck = false
+                controller.showNotificationDialog = false
+                bringAppForward()
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    controller.handleToggle(true)
+                }
+            }
+        }
+
+        // Location permission
+        if (controller.pendingLocationCheck) {
+            val lm = getSystemService(LOCATION_SERVICE) as android.location.LocationManager
+            val isOn = lm.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER) ||
+                    lm.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER)
+            if (isOn) {
+                Log.d("AppControllerService", "Location turned on — returning to app")
+                controller.pendingLocationCheck = false
+                controller.showLocationOffDialog = false
+                bringAppForward()
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    controller.checkLocationForUntrustedNetwork()
+                }
+            }
+        }
+
+        // All files access permission
+        if (controller.pendingStorageCheck) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                if (Environment.isExternalStorageManager()) {
+                    Log.d("AppControllerService", "All files access granted — returning to app")
+                    controller.pendingStorageCheck = false
+                    bringAppForward()
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        AppController.isUnlocked = true
+                    }
+                }
+            }
+        }
+    }
+
+    private fun bringAppForward() {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+        }
+        startActivity(intent)
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        isRunning = true
+        Log.d("AppControllerService", "STARTED")
+        handler.postDelayed(heartbeat, 10_000L)
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        return START_STICKY
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        isRunning = false
+        handler.removeCallbacks(heartbeat)
+        Log.d("AppControllerService", "STOPPED")
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
 }

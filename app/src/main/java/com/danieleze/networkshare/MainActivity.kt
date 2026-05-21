@@ -397,7 +397,12 @@ fun DiscoveryScreen(
 
     val bgColor = MaterialTheme.colorScheme.background
 
-    Box(modifier = Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .imePadding()
+    ) {
 
         Box(
             modifier = Modifier
@@ -523,7 +528,9 @@ fun DiscoveryScreen(
                     Surface(
                         tonalElevation = 4.dp,
                         shape = MaterialTheme.shapes.medium,
-                        modifier = Modifier.fillMaxWidth().heightIn(max = 156.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 156.dp),
                         color = if (isOn && networkState == NetworkState.TRUSTED)
                             MaterialTheme.colorScheme.surfaceVariant
                         else
@@ -546,7 +553,9 @@ fun DiscoveryScreen(
                             !isOn -> {
                                 onDismissNetworkDialog()
                                 Column(
-                                    modifier = Modifier.padding(16.dp).graphicsLayer(alpha = 0.5f)
+                                    modifier = Modifier
+                                        .padding(16.dp)
+                                        .graphicsLayer(alpha = 0.5f)
                                 ) {
                                     Text(
                                         text = "NetworkShare is off.\nTurn on the switch to start sharing.",
@@ -560,7 +569,9 @@ fun DiscoveryScreen(
                             noPaths -> {
                                 onDismissNetworkDialog()
                                 Column(
-                                    modifier = Modifier.padding(16.dp).graphicsLayer(alpha = 0.5f)
+                                    modifier = Modifier
+                                        .padding(16.dp)
+                                        .graphicsLayer(alpha = 0.5f)
                                 ) {
                                     Text(
                                         text = "No folders selected.\nGo to 'Choose Shared Paths' to start.",
@@ -574,7 +585,9 @@ fun DiscoveryScreen(
                             isOn && networkState == NetworkState.NO_NETWORK -> {
                                 LaunchedEffect(Unit) { delay(2000L); onNoNetwork() }
                                 Column(
-                                    modifier = Modifier.padding(16.dp).graphicsLayer(alpha = 0.5f)
+                                    modifier = Modifier
+                                        .padding(16.dp)
+                                        .graphicsLayer(alpha = 0.5f)
                                 ) {
                                     Text(
                                         text = "No network detected.\nJoin a WiFi or create a Hotspot to start sharing.",
@@ -590,7 +603,8 @@ fun DiscoveryScreen(
                                 SelectionContainer {
                                     LazyColumn(
                                         state = listState,
-                                        modifier = Modifier.draggableScrollbar(listState, scope)
+                                        modifier = Modifier
+                                            .draggableScrollbar(listState, scope)
                                             .padding(16.dp)
                                     ) {
                                         itemsIndexed(displayLines) { _, address ->
@@ -614,7 +628,9 @@ fun DiscoveryScreen(
                             else -> {
                                 onDismissNetworkDialog()
                                 Column(
-                                    modifier = Modifier.padding(16.dp).graphicsLayer(alpha = 0.5f)
+                                    modifier = Modifier
+                                        .padding(16.dp)
+                                        .graphicsLayer(alpha = 0.5f)
                                 ) {
                                     displayLines.forEach { address ->
                                         val isUrl = address.startsWith("http")
@@ -649,7 +665,11 @@ fun DiscoveryScreen(
                         modifier = Modifier.fillMaxWidth(),
                         color = MaterialTheme.colorScheme.surfaceVariant
                     ) {
-                        Column(modifier = Modifier.padding(12.dp).fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier
+                                .padding(12.dp)
+                                .fillMaxWidth()
+                        ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.fillMaxWidth()
@@ -771,12 +791,14 @@ fun DiscoveryScreen(
                                             ),
                                             cursorBrush = SolidColor(Color(0xFF2BAED5)),
                                             singleLine = true,
-                                            modifier = Modifier.weight(1f)
+                                            modifier = Modifier
+                                                .weight(1f)
                                                 .focusRequester(focusRequester)
                                         )
                                     }
                                     HorizontalDivider(
-                                        modifier = Modifier.offset(y = 4.dp)
+                                        modifier = Modifier
+                                            .offset(y = 4.dp)
                                             .padding(start = 90.dp, end = 16.dp, top = 8.dp),
                                         thickness = 0.5.dp,
                                         color = Color.Gray.copy(alpha = 0.3f)
@@ -787,7 +809,9 @@ fun DiscoveryScreen(
                                     // Password row
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(bottom = 8.dp)
                                     ) {
                                         Text(
                                             text = "Password",
@@ -816,7 +840,8 @@ fun DiscoveryScreen(
                                             modifier = Modifier.weight(1f)
                                         )
                                         Box(
-                                            modifier = Modifier.padding(start = 8.dp)
+                                            modifier = Modifier
+                                                .padding(start = 8.dp)
                                                 .pointerInput(Unit) {
                                                     detectTapGestures(onPress = {
                                                         passwordVisible =
@@ -855,14 +880,20 @@ fun DiscoveryScreen(
                         modifier = Modifier.fillMaxWidth(),
                         color = MaterialTheme.colorScheme.surfaceVariant
                     ) {
-                        Column(modifier = Modifier.padding(16.dp).fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier
+                                .padding(16.dp)
+                                .fillMaxWidth()
+                        ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.fillMaxWidth().clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = ripple(color = Color.DarkGray),
-                                    onClick = onOpenAllowedNetworks
-                                )
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = ripple(color = Color.DarkGray),
+                                        onClick = onOpenAllowedNetworks
+                                    )
                             ) {
                                 Image(
                                     painter = painterResource(id = R.drawable.ic_allowed_wifi),
@@ -878,7 +909,8 @@ fun DiscoveryScreen(
                                 )
                             }
                             HorizontalDivider(
-                                modifier = Modifier.offset(y = 4.dp)
+                                modifier = Modifier
+                                    .offset(y = 4.dp)
                                     .padding(start = 45.dp, end = 8.dp, top = 8.dp),
                                 thickness = 0.5.dp,
                                 color = Color.Gray.copy(alpha = 0.2f)
@@ -886,11 +918,13 @@ fun DiscoveryScreen(
                             Spacer(modifier = Modifier.height(16.dp))
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.fillMaxWidth().clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = ripple(color = Color.DarkGray),
-                                    onClick = onOpenBlockedNetworks
-                                )
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = ripple(color = Color.DarkGray),
+                                        onClick = onOpenBlockedNetworks
+                                    )
                             ) {
                                 Image(
                                     painter = painterResource(id = R.drawable.ic_blocked_wifi),
@@ -986,7 +1020,8 @@ fun DiscoveryScreen(
                                 painter = painterResource(id = R.drawable.baseline_chevron_right),
                                 contentDescription = null,
                                 tint = Color.Gray,
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier
+                                    .size(18.dp)
                                     .graphicsLayer { rotationZ = themeRotation }
                             )
                         }
@@ -1013,7 +1048,8 @@ fun DiscoveryScreen(
                                 text = {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.fillMaxWidth()
+                                        modifier = Modifier
+                                            .fillMaxWidth()
                                             .padding(start = 32.dp)
                                     ) {
                                         Icon(
@@ -1108,9 +1144,18 @@ fun FilePickerSection(
 
     androidx.activity.compose.BackHandler(enabled = true) { handleBack() }
 
-    Box(modifier = Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .imePadding()
+    ) {
 
-        Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+        ) {
             Column(
                 modifier = Modifier.fillMaxSize()
             ) {
@@ -1127,7 +1172,11 @@ fun FilePickerSection(
 
                 Spacer(modifier = Modifier.height(42.dp))
 
-                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp)
+                ) {
                     Spacer(modifier = Modifier.height(24.dp))
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -1136,18 +1185,21 @@ fun FilePickerSection(
                         Image(
                             painter = painterResource(id = R.drawable.ic_sp),
                             contentDescription = null,
-                            modifier = Modifier.size(26.dp).clickable {
-                                if (currentPath != null) {
-                                    scope.launch {
-                                        isExiting = true; delay(220); isExiting =
-                                        false; currentPath =
-                                        null; WebDAVService.scannedItems.clear()
+                            modifier = Modifier
+                                .size(26.dp)
+                                .clickable {
+                                    if (currentPath != null) {
+                                        scope.launch {
+                                            isExiting = true; delay(220); isExiting =
+                                            false; currentPath =
+                                            null; WebDAVService.scannedItems.clear()
+                                        }
                                     }
                                 }
-                            }
                         )
                         Row(
-                            modifier = Modifier.padding(start = 8.dp)
+                            modifier = Modifier
+                                .padding(start = 8.dp)
                                 .horizontalScroll(breadcrumbScrollState),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -1164,7 +1216,9 @@ fun FilePickerSection(
                                         painter = painterResource(id = R.drawable.baseline_chevron_right),
                                         contentDescription = null,
                                         tint = Color(0xFF666660),
-                                        modifier = Modifier.size(22.dp).padding(horizontal = 2.dp)
+                                        modifier = Modifier
+                                            .size(22.dp)
+                                            .padding(horizontal = 2.dp)
                                     )
                                     Text(
                                         text = formatBreadcrumbName(rawName),
@@ -1188,12 +1242,15 @@ fun FilePickerSection(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Box(
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier
+                        .fillMaxSize()
                         .background(color = MaterialTheme.colorScheme.surfaceVariant)
                 ) {
                     LazyColumn(
                         state = listState,
-                        modifier = Modifier.fillMaxSize().draggableScrollbar(listState, scope)
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .draggableScrollbar(listState, scope)
                             .graphicsLayer(alpha = if (isLoading) 0f else 1f),
                         contentPadding = PaddingValues(horizontal = 24.dp, vertical = 32.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -1319,10 +1376,16 @@ fun StorageRow(
         Image(
             painter = painterResource(id = if (path == "Folder") R.drawable.ic_folder else R.drawable.ic_drive),
             contentDescription = null,
-            modifier = Modifier.size(40.dp).padding(end = 16.dp)
+            modifier = Modifier
+                .size(40.dp)
+                .padding(end = 16.dp)
         )
         Spacer(modifier = Modifier.width(16.dp))
-        Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 16.dp)
+        ) {
             Text(
                 text = name,
                 modifier = Modifier.offset(y = if (isLast) 0.dp else 4.dp),
@@ -1331,7 +1394,9 @@ fun StorageRow(
             )
             if (!isLast) {
                 HorizontalDivider(
-                    modifier = Modifier.offset(y = 16.dp).padding(top = 8.dp),
+                    modifier = Modifier
+                        .offset(y = 16.dp)
+                        .padding(top = 8.dp),
                     thickness = 0.5.dp,
                     color = Color.Gray.copy(alpha = 0.3f)
                 )
@@ -1340,7 +1405,8 @@ fun StorageRow(
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
-                .size(28.dp).padding(4.dp)
+                .size(28.dp)
+                .padding(4.dp)
                 .border(
                     2.dp,
                     if (isInherited) inheritedColor else if (isChecked || isPartiallyChecked) Color(
@@ -1370,11 +1436,14 @@ fun StorageRow(
                     painter = painterResource(id = R.drawable.baseline_check),
                     contentDescription = "Selected",
                     tint = if (isInherited) inheritedCheck else if (isDark) Color.Black else Color.White,
-                    modifier = Modifier.size(22.dp).padding(2.dp)
+                    modifier = Modifier
+                        .size(22.dp)
+                        .padding(2.dp)
                 )
             } else if (isPartiallyChecked) {
                 Box(
-                    modifier = Modifier.size(10.dp)
+                    modifier = Modifier
+                        .size(10.dp)
                         .background(Color(0xFF2BAED5), RoundedCornerShape(2.dp))
                 )
             }
@@ -1388,7 +1457,10 @@ fun BiometricGateScreen(onUnlockClick: () -> Unit) {
     LaunchedEffect(Unit) { delay(100); buttonReady = true; delay(1000); onUnlockClick() }
 
     Column(
-        modifier = Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState())
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .verticalScroll(rememberScrollState())
             .padding(24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
@@ -1396,11 +1468,15 @@ fun BiometricGateScreen(onUnlockClick: () -> Unit) {
         Surface(
             tonalElevation = 4.dp,
             shape = MaterialTheme.shapes.medium,
-            modifier = Modifier.widthIn(max = 360.dp).fillMaxWidth(),
+            modifier = Modifier
+                .widthIn(max = 360.dp)
+                .fillMaxWidth(),
             color = MaterialTheme.colorScheme.surfaceVariant
         ) {
             Column(
-                modifier = Modifier.padding(24.dp).fillMaxWidth(),
+                modifier = Modifier
+                    .padding(24.dp)
+                    .fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Image(
@@ -1455,12 +1531,25 @@ fun NetworkListScreen(
 
     androidx.activity.compose.BackHandler { onBack() }
 
-    Box(modifier = Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .imePadding()
+    ) {
 
-        Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+        ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 Spacer(modifier = Modifier.height(42.dp))
-                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp)
+                ) {
                     Spacer(modifier = Modifier.height(24.dp))
                     Text(
                         text = title,
@@ -1471,7 +1560,8 @@ fun NetworkListScreen(
                 }
                 Spacer(modifier = Modifier.height(16.dp))
                 Box(
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier
+                        .fillMaxSize()
                         .background(MaterialTheme.colorScheme.surfaceVariant)
                 ) {
                     if (networks.isEmpty()) {
@@ -1488,7 +1578,8 @@ fun NetworkListScreen(
                     } else {
                         LazyColumn(
                             state = listState,
-                            modifier = Modifier.fillMaxSize()
+                            modifier = Modifier
+                                .fillMaxSize()
                                 .draggableScrollbar(listState, scope),
                             contentPadding = PaddingValues(
                                 horizontal = 24.dp,
@@ -1574,7 +1665,8 @@ fun NetworkRow(
 
     AnimatedVisibility(visible = !collapsed, exit = shrinkVertically(animationSpec = tween(200))) {
         Row(
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
                 .graphicsLayer { translationX = offsetX.dp.toPx(); this.alpha = alpha }
                 .padding(vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -1583,10 +1675,16 @@ fun NetworkRow(
                 painter = painterResource(id = iconRes),
                 tint = Color(0xFF2BAED5),
                 contentDescription = null,
-                modifier = Modifier.size(28.dp).offset(y = (-4).dp)
+                modifier = Modifier
+                    .size(28.dp)
+                    .offset(y = (-4).dp)
             )
             Spacer(modifier = Modifier.width(16.dp))
-            Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = 8.dp)
+            ) {
                 Text(
                     text = ssid,
                     modifier = Modifier.offset(y = if (isLast) 0.dp else 4.dp),
@@ -1595,7 +1693,9 @@ fun NetworkRow(
                 )
                 if (!isLast) {
                     HorizontalDivider(
-                        modifier = Modifier.offset(y = 16.dp).padding(top = 8.dp),
+                        modifier = Modifier
+                            .offset(y = 16.dp)
+                            .padding(top = 8.dp),
                         thickness = 0.5.dp,
                         color = Color.Gray.copy(alpha = 0.3f)
                     )
@@ -1603,7 +1703,9 @@ fun NetworkRow(
             }
             IconButton(
                 onClick = { removing = true },
-                modifier = Modifier.size(28.dp).offset(y = (-4).dp)
+                modifier = Modifier
+                    .size(28.dp)
+                    .offset(y = (-4).dp)
             ) {
                 Icon(
                     painter = painterResource(id = R.drawable.baseline_close),
@@ -1620,12 +1722,25 @@ fun NetworkRow(
 fun UserGuideScreen(onBack: () -> Unit) {
     androidx.activity.compose.BackHandler { onBack() }
 
-    Box(modifier = Modifier.fillMaxSize().statusBarsPadding().imePadding()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .imePadding()
+    ) {
 
-        Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+        ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 Spacer(modifier = Modifier.height(42.dp))
-                Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp)) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp)
+                ) {
                     Spacer(modifier = Modifier.height(24.dp))
                     Text(
                         text = "User Guide",
@@ -1636,7 +1751,8 @@ fun UserGuideScreen(onBack: () -> Unit) {
                 }
                 Spacer(modifier = Modifier.height(16.dp))
                 Box(
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier
+                        .fillMaxSize()
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                     contentAlignment = Alignment.Center
                 ) {
@@ -1695,13 +1811,17 @@ fun LocationOffDialog(show: Boolean, appTheme: AppTheme, onDismiss: () -> Unit) 
         )
     ) {
         Box(
-            modifier = Modifier.fillMaxSize(0.98f).clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) { onDismiss() }, contentAlignment = Alignment.Center
+            modifier = Modifier
+                .fillMaxSize(0.98f)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { onDismiss() }, contentAlignment = Alignment.Center
         ) {
             Surface(
-                modifier = Modifier.offset(y = (-24).dp).fillMaxWidth(0.95f)
+                modifier = Modifier
+                    .offset(y = (-24).dp)
+                    .fillMaxWidth(0.95f)
                     .padding(horizontal = 4.dp),
                 shape = RoundedCornerShape(28.dp),
                 color = if (isDark) Color(0xFF252525) else Color(0xFFFCFCFC),
@@ -1727,11 +1847,11 @@ fun LocationOffDialog(show: Boolean, appTheme: AppTheme, onDismiss: () -> Unit) 
                         color = Color.Gray.copy(alpha = 0.2f)
                     )
                     TextButton(onClick = {
-                        onDismiss(); context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS).apply {
-                        addFlags(
-                            Intent.FLAG_ACTIVITY_NO_HISTORY
-                        )
-                    })
+                        onDismiss()
+                        (context as? AppController)?.pendingLocationCheck = true
+                        context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY)
+                        })
                     }, modifier = Modifier.fillMaxWidth()) {
                         Text("Open Settings", color = Color(0xFF2BAED5), fontSize = 18.sp)
                     }
@@ -1757,13 +1877,17 @@ fun UnknownNetworkDialog(show: Boolean, ssid: String?, appTheme: AppTheme, onDis
         )
     ) {
         Box(
-            modifier = Modifier.fillMaxSize(0.98f).clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) { onDismiss() }, contentAlignment = Alignment.Center
+            modifier = Modifier
+                .fillMaxSize(0.98f)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { onDismiss() }, contentAlignment = Alignment.Center
         ) {
             Surface(
-                modifier = Modifier.offset(y = (-24).dp).fillMaxWidth(0.95f)
+                modifier = Modifier
+                    .offset(y = (-24).dp)
+                    .fillMaxWidth(0.95f)
                     .padding(horizontal = 4.dp),
                 shape = RoundedCornerShape(28.dp),
                 color = if (isDark) Color(0xFF252525) else Color(0xFFFCFCFC),
@@ -1843,13 +1967,17 @@ fun NoNetworkDialog(show: Boolean, appTheme: AppTheme, onDismiss: () -> Unit) {
         )
     ) {
         Box(
-            modifier = Modifier.fillMaxSize(0.98f).clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) { onDismiss() }, contentAlignment = Alignment.Center
+            modifier = Modifier
+                .fillMaxSize(0.98f)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { onDismiss() }, contentAlignment = Alignment.Center
         ) {
             Surface(
-                modifier = Modifier.offset(y = (-24).dp).fillMaxWidth(0.95f)
+                modifier = Modifier
+                    .offset(y = (-24).dp)
+                    .fillMaxWidth(0.95f)
                     .padding(horizontal = 4.dp),
                 shape = RoundedCornerShape(28.dp),
                 color = if (isDark) Color(0xFF252525) else Color(0xFFFCFCFC),
@@ -1895,7 +2023,9 @@ fun NoNetworkDialog(show: Boolean, appTheme: AppTheme, onDismiss: () -> Unit) {
                             )
                         }
                         VerticalDivider(
-                            modifier = Modifier.height(20.dp).width(1.dp),
+                            modifier = Modifier
+                                .height(20.dp)
+                                .width(1.dp),
                             color = Color.Gray.copy(alpha = 0.2f)
                         )
                         TextButton(onClick = {
@@ -1934,13 +2064,17 @@ fun NotificationPermissionDialog(show: Boolean, appTheme: AppTheme, onDismiss: (
         )
     ) {
         Box(
-            modifier = Modifier.fillMaxSize(0.98f).clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null
-            ) { onDismiss() }, contentAlignment = Alignment.Center
+            modifier = Modifier
+                .fillMaxSize(0.98f)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { onDismiss() }, contentAlignment = Alignment.Center
         ) {
             Surface(
-                modifier = Modifier.offset(y = (-24).dp).fillMaxWidth(0.95f)
+                modifier = Modifier
+                    .offset(y = (-24).dp)
+                    .fillMaxWidth(0.95f)
                     .padding(horizontal = 4.dp),
                 shape = RoundedCornerShape(28.dp),
                 color = if (isDark) Color(0xFF252525) else Color(0xFFFCFCFC),
@@ -1966,12 +2100,11 @@ fun NotificationPermissionDialog(show: Boolean, appTheme: AppTheme, onDismiss: (
                         color = Color.Gray.copy(alpha = 0.2f)
                     )
                     TextButton(onClick = {
-                        onDismiss(); context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-                        putExtra(
-                            Settings.EXTRA_APP_PACKAGE,
-                            context.packageName
-                        )
-                    })
+                        onDismiss()
+                        (context as? AppController)?.pendingNotificationCheck = true
+                        context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                        })
                     }, modifier = Modifier.fillMaxWidth()) {
                         Text("Open Settings", color = Color(0xFF2BAED5), fontSize = 18.sp)
                     }
@@ -1991,50 +2124,52 @@ fun Modifier.draggableScrollbar(
     color: Color = Color.DarkGray.copy(alpha = 0.6f)
 ): Modifier = this.composed {
     var isPressed by remember { mutableStateOf(false) }
-    this.drawWithContent {
-        drawContent()
-        val layoutInfo = state.layoutInfo
-        val totalItems = layoutInfo.totalItemsCount
-        val visibleItems = layoutInfo.visibleItemsInfo
-        if (visibleItems.size < totalItems) {
-            val viewportHeight = size.height
-            val scrollbarHeight =
-                (viewportHeight * visibleItems.size / totalItems).coerceAtLeast(64f)
-            val scrollProgress = state.firstVisibleItemIndex.toFloat() / totalItems
-            val scrollbarOffsetY = scrollProgress * viewportHeight
-            val thickness = if (isPressed) 8.dp.toPx() else 6.dp.toPx()
-            val barColor = if (isPressed) Color(0xFF2BAED5).copy(alpha = 0.6f) else color
-            val marginEnd = 8.dp.toPx()
-            drawRoundRect(
-                color = barColor,
-                topLeft = Offset(
-                    size.width - marginEnd - thickness,
-                    scrollbarOffsetY.coerceIn(0f, viewportHeight - scrollbarHeight)
-                ),
-                size = Size(thickness, scrollbarHeight),
-                cornerRadius = CornerRadius(thickness / 2, thickness / 2)
-            )
+    this
+        .drawWithContent {
+            drawContent()
+            val layoutInfo = state.layoutInfo
+            val totalItems = layoutInfo.totalItemsCount
+            val visibleItems = layoutInfo.visibleItemsInfo
+            if (visibleItems.size < totalItems) {
+                val viewportHeight = size.height
+                val scrollbarHeight =
+                    (viewportHeight * visibleItems.size / totalItems).coerceAtLeast(64f)
+                val scrollProgress = state.firstVisibleItemIndex.toFloat() / totalItems
+                val scrollbarOffsetY = scrollProgress * viewportHeight
+                val thickness = if (isPressed) 8.dp.toPx() else 6.dp.toPx()
+                val barColor = if (isPressed) Color(0xFF2BAED5).copy(alpha = 0.6f) else color
+                val marginEnd = 8.dp.toPx()
+                drawRoundRect(
+                    color = barColor,
+                    topLeft = Offset(
+                        size.width - marginEnd - thickness,
+                        scrollbarOffsetY.coerceIn(0f, viewportHeight - scrollbarHeight)
+                    ),
+                    size = Size(thickness, scrollbarHeight),
+                    cornerRadius = CornerRadius(thickness / 2, thickness / 2)
+                )
+            }
         }
-    }.pointerInput(state) {
-        detectDragGestures(
-            onDragStart = { isPressed = true },
-            onDragEnd = { isPressed = false },
-            onDragCancel = { isPressed = false },
-            onDrag = { change, _ ->
-                change.consume()
-                val totalItems = state.layoutInfo.totalItemsCount
-                if (totalItems > 0) {
-                    val targetIndex = ((change.position.y / size.height) * totalItems).toInt()
-                    coroutineScope.launch {
-                        state.scrollToItem(
-                            targetIndex.coerceIn(
-                                0,
-                                totalItems - 1
+        .pointerInput(state) {
+            detectDragGestures(
+                onDragStart = { isPressed = true },
+                onDragEnd = { isPressed = false },
+                onDragCancel = { isPressed = false },
+                onDrag = { change, _ ->
+                    change.consume()
+                    val totalItems = state.layoutInfo.totalItemsCount
+                    if (totalItems > 0) {
+                        val targetIndex = ((change.position.y / size.height) * totalItems).toInt()
+                        coroutineScope.launch {
+                            state.scrollToItem(
+                                targetIndex.coerceIn(
+                                    0,
+                                    totalItems - 1
+                                )
                             )
-                        )
+                        }
                     }
                 }
-            }
-        )
-    }
+            )
+        }
 }
