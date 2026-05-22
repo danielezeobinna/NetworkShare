@@ -481,14 +481,12 @@ class WebDAVServer(
                 IconResource=%SystemRoot%\System32\imageres.dll,42
             """.trimIndent()
 
-            else -> """
-                [ViewState]
-                Mode=
-                Vid=
-                FolderType=Generic
-                [.ShellClassInfo]
-                IconResource=C:\Windows\System32\SHELL32.dll,4
-            """.trimIndent()
+            else -> return newFixedLengthResponse(
+                Response.Status.lookup(410),
+                MIME_PLAINTEXT,
+                "Not Available"
+            )
+
         }.replace("\n", "\r\n")
 
         val encodedBytes = content.toByteArray(Charsets.UTF_16LE)
@@ -1100,6 +1098,7 @@ class WebDAVServer(
         val isRootChild = file.parentFile?.absolutePath == rootDirectory.absolutePath
         val iconFolders =
             listOf("DCIM", "Documents", "Download", "Movies", "Music", "NetworkShare", "Pictures")
+        val hasDesktopIni = File(file.absolutePath, "desktop.ini").exists()
 
         val attributes = when {
             isWithinAndroid -> "0x00000004"
@@ -1110,6 +1109,7 @@ class WebDAVServer(
                 )
             } -> "0x00000001"
 
+            isDir && hasDesktopIni -> "0x00000001"
             isDir -> "0x00000010"
             else -> "0x00000020"
         }
