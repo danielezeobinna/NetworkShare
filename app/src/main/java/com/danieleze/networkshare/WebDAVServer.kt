@@ -2,7 +2,6 @@ package com.danieleze.networkshare
 
 import android.content.Context
 import android.util.Log
-import fi.iki.elonen.NanoHTTPD
 import java.io.File
 import java.io.FileInputStream
 import java.io.IOException
@@ -56,9 +55,9 @@ private object PersistenceGuard {
 //  Digest Auth Manager (embedded)
 // ─────────────────────────────────────────────────────────────
 private object DigestAuthManager {
-    private const val REALM             = "NetworkShare"
+    private const val REALM = "NetworkShare"
     private const val NONCE_VALIDITY_MS = 1_800_000L
-    private const val SESSION_IDLE_MS   = 600_000L
+    private const val SESSION_IDLE_MS = 600_000L
 
     // nonce -> creation timestamp
     private val validNonces = ConcurrentHashMap<String, Long>()
@@ -110,14 +109,14 @@ private object DigestAuthManager {
     fun validateAuthorization(authHeader: String, method: String): Boolean {
         if (!authHeader.startsWith("Digest ")) return false
 
-        val params   = parseDigestParams(authHeader)
-        val nonce    = params["nonce"]    ?: return false
-        val uri      = params["uri"]      ?: return false
+        val params = parseDigestParams(authHeader)
+        val nonce = params["nonce"] ?: return false
+        val uri = params["uri"] ?: return false
         val response = params["response"] ?: return false
-        val user     = params["username"] ?: return false
-        val nc       = params["nc"]       ?: "00000001"
-        val cnonce   = params["cnonce"]   ?: ""
-        val qop      = params["qop"]
+        val user = params["username"] ?: return false
+        val nc = params["nc"] ?: "00000001"
+        val cnonce = params["cnonce"] ?: ""
+        val qop = params["qop"]
 
         if (user != username) return false
         if (!isNonceValid(nonce)) return false
@@ -135,11 +134,11 @@ private object DigestAuthManager {
     }
 
     private fun parseDigestParams(header: String): Map<String, String> {
-        val result  = mutableMapOf<String, String>()
+        val result = mutableMapOf<String, String>()
         val content = header.removePrefix("Digest ")
-        val regex   = Regex("""(\w+)=(?:"([^"]*)"|([^,\s]*))""")
+        val regex = Regex("""(\w+)=(?:"([^"]*)"|([^,\s]*))""")
         regex.findAll(content).forEach { match ->
-            val key   = match.groupValues[1]
+            val key = match.groupValues[1]
             val value = match.groupValues[2].ifEmpty { match.groupValues[3] }
             result[key] = value
         }
@@ -147,7 +146,7 @@ private object DigestAuthManager {
     }
 
     fun buildWwwAuthenticateHeader(stale: Boolean = false): String {
-        val nonce    = generateNonce()
+        val nonce = generateNonce()
         val staleStr = if (stale) ", stale=true" else ""
         return """Digest realm="$REALM", qop="auth", nonce="$nonce", algorithm=MD5$staleStr"""
     }
@@ -167,10 +166,10 @@ private object DigestAuthManager {
             existing.frozenRemainingMs = SESSION_IDLE_MS
         } else {
             authenticatedSessions[sessionKey] = SessionState(
-                sessionKey         = sessionKey,
-                expiryMs           = System.currentTimeMillis() + SESSION_IDLE_MS,
-                isTransferring     = false,
-                frozenRemainingMs  = SESSION_IDLE_MS
+                sessionKey = sessionKey,
+                expiryMs = System.currentTimeMillis() + SESSION_IDLE_MS,
+                isTransferring = false,
+                frozenRemainingMs = SESSION_IDLE_MS
             )
         }
     }
@@ -200,7 +199,7 @@ private object DigestAuthManager {
     fun pauseTimer(sessionKey: String) {
         val state = authenticatedSessions[sessionKey] ?: return
         state.frozenRemainingMs = maxOf(0L, state.expiryMs - System.currentTimeMillis())
-        state.isTransferring    = true
+        state.isTransferring = true
     }
 
     /**
@@ -210,7 +209,7 @@ private object DigestAuthManager {
     fun resumeTimer(sessionKey: String) {
         val state = authenticatedSessions[sessionKey] ?: return
         state.isTransferring = false
-        state.expiryMs       = System.currentTimeMillis() + state.frozenRemainingMs
+        state.expiryMs = System.currentTimeMillis() + state.frozenRemainingMs
     }
 }
 
@@ -224,7 +223,7 @@ class WebDAVServer(
     private val allowedPaths: List<String>,
     private val listener: TransferListener,
     val boundIp: String = "0.0.0.0",
-) : NanoHTTPD(boundIp, port) {
+) : FastHTTPD(boundIp, port) {
 
     private var isShuttingDown = false
     private val tag = "WebDAVServer:$port"
@@ -252,7 +251,11 @@ class WebDAVServer(
             // 403 instead of 400. Windows treats 403 as retriable; 400 causes it to
             // give up and show the misleading "file too large" error.
             Log.e(tag, "Unhandled error in serve(): ${e.message}", e)
-            newFixedLengthResponse(Response.Status.FORBIDDEN, MIME_PLAINTEXT, "Server busy, please retry.")
+            newFixedLengthResponse(
+                Response.Status.FORBIDDEN,
+                MIME_PLAINTEXT,
+                "Server busy, please retry."
+            )
         }
     }
 
@@ -265,7 +268,11 @@ class WebDAVServer(
             )
         }
         if (isShuttingDown) {
-            return newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Server is shutting down.")
+            return newFixedLengthResponse(
+                Response.Status.NOT_FOUND,
+                MIME_PLAINTEXT,
+                "Server is shutting down."
+            )
         }
 
         if (!WebDAVService.isNetworkTrusted.value) {
@@ -292,10 +299,14 @@ class WebDAVServer(
             val isAuthenticated = when {
                 isValidToken && isReadOnly -> true
                 DigestAuthManager.isSessionCached(sessionKey) -> true
-                authHeader.isNotEmpty() && DigestAuthManager.validateAuthorization(authHeader, session.method.name) -> {
+                authHeader.isNotEmpty() && DigestAuthManager.validateAuthorization(
+                    authHeader,
+                    session.method.name
+                ) -> {
                     DigestAuthManager.cacheSession(sessionKey)
                     true
                 }
+
                 else -> false
             }
 
@@ -311,24 +322,28 @@ class WebDAVServer(
             }
         }
 
-        val uri        = session.uri
-        val method     = session.method
+        val uri = session.uri
+        val method = session.method
         val targetFile = File(rootDirectory, uri.trimStart('/'))
         val targetPath = targetFile.absolutePath
-        val fileName   = targetFile.name
+        val fileName = targetFile.name
         val isDesktopIni = fileName.equals("desktop.ini", ignoreCase = true)
-        val isRoot       = uri == "/" || uri.isEmpty()
+        val isRoot = uri == "/" || uri.isEmpty()
 
         val isAllowed = isRoot || isDesktopIni || allowedPaths.any { sharedPath ->
             targetPath == sharedPath || targetPath.startsWith("$sharedPath/")
         }
 
         if (!isAllowed) {
-            return newFixedLengthResponse(Response.Status.FORBIDDEN, MIME_PLAINTEXT, "Access Denied")
+            return newFixedLengthResponse(
+                Response.Status.FORBIDDEN,
+                MIME_PLAINTEXT,
+                "Access Denied"
+            )
         }
 
         return when (method) {
-            Method.OPTIONS  -> serveOptions()
+            Method.OPTIONS -> serveOptions()
             Method.PROPFIND -> {
                 if (isDesktopIni && !targetFile.exists()) {
                     serveVirtualDesktopIniPropfind(uri)
@@ -338,6 +353,7 @@ class WebDAVServer(
                     serveNotFound()
                 }
             }
+
             Method.GET -> {
                 if (isDesktopIni) {
                     if (targetFile.exists()) serveFile(targetFile, session)
@@ -346,21 +362,27 @@ class WebDAVServer(
                     if (targetFile.exists()) serveFile(targetFile, session) else serveNotFound()
                 }
             }
-            Method.DELETE   -> handleDelete(targetFile)
-            Method.PUT      -> handlePut(session, targetFile)
-            Method.MKCOL    -> handleMkcol(targetFile)
+
+            Method.DELETE -> handleDelete(targetFile)
+            Method.PUT -> handlePut(session, targetFile)
+            Method.MKCOL -> handleMkcol(targetFile)
             Method.PROPPATCH -> handleProppatch(session, targetFile)
-            Method.MOVE     -> handleMove(session, targetFile)
-            Method.LOCK     -> serveLock(uri)
-            Method.UNLOCK   -> newFixedLengthResponse(Response.Status.NO_CONTENT, MIME_PLAINTEXT, "")
-            Method.HEAD     -> if (targetFile.exists()) {
+            Method.MOVE -> handleMove(session, targetFile)
+            Method.LOCK -> serveLock(uri)
+            Method.UNLOCK -> newFixedLengthResponse(Response.Status.NO_CONTENT, MIME_PLAINTEXT, "")
+            Method.HEAD -> if (targetFile.exists()) {
                 val res = newFixedLengthResponse(Response.Status.OK, "application/octet-stream", "")
                 res.addHeader("Content-Length", targetFile.length().toString())
                 res.addHeader("Accept-Ranges", "bytes")
                 res.addHeader("ETag", "\"${targetFile.lastModified()}-${targetFile.length()}\"")
                 res
             } else serveNotFound()
-            else -> newFixedLengthResponse(Response.Status.METHOD_NOT_ALLOWED, MIME_PLAINTEXT, "Not Supported")
+
+            else -> newFixedLengthResponse(
+                Response.Status.METHOD_NOT_ALLOWED,
+                MIME_PLAINTEXT,
+                "Not Supported"
+            )
         }
     }
 
@@ -368,7 +390,7 @@ class WebDAVServer(
 
     private fun serveVirtualDesktopIni(uri: String): Response {
         val folderPath = uri.removeSuffix("/desktop.ini").removeSuffix("/")
-        val cleanPath  = folderPath.ifEmpty { "/" }
+        val cleanPath = folderPath.ifEmpty { "/" }
 
         val content = when {
             cleanPath == "/" -> """
@@ -470,12 +492,17 @@ class WebDAVServer(
         }.replace("\n", "\r\n")
 
         val encodedBytes = content.toByteArray(Charsets.UTF_16LE)
-        val finalBody    = ByteArray(encodedBytes.size + 2)
+        val finalBody = ByteArray(encodedBytes.size + 2)
         finalBody[0] = 0xFF.toByte()
         finalBody[1] = 0xFE.toByte()
         System.arraycopy(encodedBytes, 0, finalBody, 2, encodedBytes.size)
 
-        val res = newFixedLengthResponse(Response.Status.OK, "application/octet-stream", finalBody.inputStream(), finalBody.size.toLong())
+        val res = newFixedLengthResponse(
+            Response.Status.OK,
+            "application/octet-stream",
+            finalBody.inputStream(),
+            finalBody.size.toLong()
+        )
         res.addHeader("Content-Type", "text/plain; charset=utf-16le")
         return res
     }
@@ -502,7 +529,11 @@ class WebDAVServer(
 
     private fun serveVirtualDesktopIniPropfind(uri: String): Response {
         val xmlBody = getVirtualDesktopIniXml(uri)
-        return newFixedLengthResponse(Response.Status.lookup(207), "application/xml; charset=utf-8", xmlBody)
+        return newFixedLengthResponse(
+            Response.Status.lookup(207),
+            "application/xml; charset=utf-8",
+            xmlBody
+        )
     }
 
     // ── WebDAV method handlers ───────────────────────────────
@@ -510,11 +541,19 @@ class WebDAVServer(
     private fun handleMkcol(target: File): Response {
         return try {
             if (target.exists()) {
-                newFixedLengthResponse(Response.Status.METHOD_NOT_ALLOWED, MIME_PLAINTEXT, "Folder already exists")
+                newFixedLengthResponse(
+                    Response.Status.METHOD_NOT_ALLOWED,
+                    MIME_PLAINTEXT,
+                    "Folder already exists"
+                )
             } else if (target.mkdirs()) {
                 newFixedLengthResponse(Response.Status.CREATED, MIME_PLAINTEXT, "Created")
             } else {
-                newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Failed to create folder")
+                newFixedLengthResponse(
+                    Response.Status.INTERNAL_ERROR,
+                    MIME_PLAINTEXT,
+                    "Failed to create folder"
+                )
             }
         } catch (e: Exception) {
             newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, e.message)
@@ -522,18 +561,22 @@ class WebDAVServer(
     }
 
     private fun handlePut(session: IHTTPSession, target: File): Response {
-        val tempFile   = File(target.parentFile, ".~${target.name}.${UUID.randomUUID()}.tmp")
+        val tempFile = File(target.parentFile, ".~${target.name}.${UUID.randomUUID()}.tmp")
         val sessionKey = "${session.remoteIpAddress}|${session.headers["user-agent"]}"
         val isReplace = target.exists() && target.length() > 0L
 
         if (isReplace && !PersistenceGuard.isSafeToDelete(context, target.absolutePath)) {
             Log.w(tag, "Safety Lock Active: Blocking PUT (replace) for ${target.name}")
-            return newFixedLengthResponse(Response.Status.FORBIDDEN, MIME_PLAINTEXT, "Safety Lock Active")
+            return newFixedLengthResponse(
+                Response.Status.FORBIDDEN,
+                MIME_PLAINTEXT,
+                "Safety Lock Active"
+            )
         }
 
         return try {
             target.parentFile?.mkdirs()
-            val inputStream   = session.inputStream
+            val inputStream = session.inputStream
             val contentLength = session.headers["content-length"]?.toLong() ?: 0L
 
             DigestAuthManager.pauseTimer(sessionKey)
@@ -545,8 +588,8 @@ class WebDAVServer(
             }
 
             tempFile.outputStream().use { output ->
-                val buffer         = ByteArray(65536)
-                var totalRead      = 0L
+                val buffer = ByteArray(65536)
+                var totalRead = 0L
                 var lastUpdateTime = 0L
 
                 while (totalRead < contentLength) {
@@ -554,7 +597,11 @@ class WebDAVServer(
                         WebDAVService.clearCancel(target.name)
                         tempFile.delete()
                         // Lock stays active — original file is protected.
-                        return newFixedLengthResponse(Response.Status.FORBIDDEN, MIME_PLAINTEXT, "Transfer cancelled by user.")
+                        return newFixedLengthResponse(
+                            Response.Status.FORBIDDEN,
+                            MIME_PLAINTEXT,
+                            "Transfer cancelled by user."
+                        )
                     }
 
                     val read = inputStream.read(buffer)
@@ -586,7 +633,11 @@ class WebDAVServer(
             } else {
                 tempFile.delete()
                 // Incomplete upload — lock stays on the original if it's a replace.
-                newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Transfer incomplete")
+                newFixedLengthResponse(
+                    Response.Status.INTERNAL_ERROR,
+                    MIME_PLAINTEXT,
+                    "Transfer incomplete"
+                )
             }
 
         } catch (e: Exception) {
@@ -614,19 +665,28 @@ class WebDAVServer(
                     </D:propstat>
                 </D:response>
             </D:multistatus>""".trimIndent()
-        return newFixedLengthResponse(Response.Status.lookup(207), "application/xml; charset=utf-8", xml)
+        return newFixedLengthResponse(
+            Response.Status.lookup(207),
+            "application/xml; charset=utf-8",
+            xml
+        )
     }
 
     private fun handleMove(session: IHTTPSession, target: File): Response {
         val destinationHeader = session.headers["destination"] ?: return serveNotFound()
         return try {
-            val decodedPath = java.net.URLDecoder.decode(java.net.URL(destinationHeader).path, "UTF-8")
-            val destFile    = File(rootDirectory, decodedPath.trimStart('/'))
+            val decodedPath =
+                java.net.URLDecoder.decode(java.net.URL(destinationHeader).path, "UTF-8")
+            val destFile = File(rootDirectory, decodedPath.trimStart('/'))
             destFile.parentFile?.mkdirs()
             if (target.renameTo(destFile)) {
                 newFixedLengthResponse(Response.Status.CREATED, MIME_PLAINTEXT, "Moved")
             } else {
-                newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Move Failed")
+                newFixedLengthResponse(
+                    Response.Status.INTERNAL_ERROR,
+                    MIME_PLAINTEXT,
+                    "Move Failed"
+                )
             }
         } catch (e: Exception) {
             newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, e.message)
@@ -641,7 +701,11 @@ class WebDAVServer(
                     context.showSafetyAlert(target.name)
                 }
                 Log.w(tag, "Safety Lock Active: Blocking DELETE for ${target.name}")
-                return newFixedLengthResponse(Response.Status.FORBIDDEN, MIME_PLAINTEXT, "Safety Lock Active")
+                return newFixedLengthResponse(
+                    Response.Status.FORBIDDEN,
+                    MIME_PLAINTEXT,
+                    "Safety Lock Active"
+                )
             }
         }
 
@@ -660,7 +724,7 @@ class WebDAVServer(
 
     private fun serveLock(uri: String): Response {
         val token = "uuid:${UUID.randomUUID()}"
-        val xml   = """<?xml version="1.0" encoding="utf-8" ?>
+        val xml = """<?xml version="1.0" encoding="utf-8" ?>
             <D:prop xmlns:D="DAV:">
                 <D:lockdiscovery>
                     <D:activelock>
@@ -681,7 +745,10 @@ class WebDAVServer(
 
     private fun serveOptions(): Response {
         val res = newFixedLengthResponse(Response.Status.OK, MIME_PLAINTEXT, "")
-        res.addHeader("Allow", "GET, POST, OPTIONS, PROPFIND, PUT, MKCOL, DELETE, COPY, MOVE, LOCK, UNLOCK")
+        res.addHeader(
+            "Allow",
+            "GET, POST, OPTIONS, PROPFIND, PUT, MKCOL, DELETE, COPY, MOVE, LOCK, UNLOCK"
+        )
         res.addHeader("DAV", "1, 2")
         res.addHeader("MS-Author-Via", "DAV")
         return res
@@ -690,9 +757,9 @@ class WebDAVServer(
     // ── File serving ─────────────────────────────────────────
 
     private fun serveFile(target: File, session: IHTTPSession): Response {
-        val fileLength  = target.length()
+        val fileLength = target.length()
         val rangeHeader = session.headers["range"]
-        val sessionKey  = "${session.remoteIpAddress}|${session.headers["user-agent"]}"
+        val sessionKey = "${session.remoteIpAddress}|${session.headers["user-agent"]}"
 
         return try {
             if (target.isDirectory) {
@@ -701,9 +768,10 @@ class WebDAVServer(
                 //
                 // HTTP:  http://192.168.111.27:8080/Download
                 // UNC:   \\192.168.111.27@8080\DavWWWRoot\Download
-                val host    = session.headers["host"] ?: "$boundIp:$port"  // e.g. "192.168.111.27:8080"
-                val parts   = host.split(":")
-                val ip      = parts[0]
+                val host =
+                    session.headers["host"] ?: "$boundIp:$port"  // e.g. "192.168.111.27:8080"
+                val parts = host.split(":")
+                val ip = parts[0]
                 val portStr = if (parts.size > 1) parts[1] else "80"
 
                 // URI path after the host, e.g. "/Download" or "/"
@@ -873,12 +941,16 @@ class WebDAVServer(
   </script>
 </body>
 </html>"""
-                return newFixedLengthResponse(Response.Status.FORBIDDEN, "text/html; charset=utf-8", html)
+                return newFixedLengthResponse(
+                    Response.Status.FORBIDDEN,
+                    "text/html; charset=utf-8",
+                    html
+                )
             }
 
             var startOffset = 0L
-            var endOffset   = fileLength - 1
-            var isPartial   = false
+            var endOffset = fileLength - 1
+            var isPartial = false
 
             if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
                 isPartial = true
@@ -890,8 +962,9 @@ class WebDAVServer(
             }
 
             val dataToDeliver = endOffset - startOffset + 1
-            val fis           = FileInputStream(target)
+            val fis = FileInputStream(target)
             if (startOffset > 0) fis.skip(startOffset)
+            val bufferedFis = java.io.BufferedInputStream(fis, FAST_BUFFER_SIZE)
             val path = target.absolutePath
 
             if (!isPartial) DigestAuthManager.pauseTimer(sessionKey) // ← freeze idle countdown
@@ -908,13 +981,18 @@ class WebDAVServer(
                     val maxToRead = min(len.toLong(), dataToDeliver - totalBytesRead).toInt()
                     if (maxToRead <= 0) return -1
 
-                    val bytesRead = fis.read(b, off, maxToRead)
+                    val bytesRead = bufferedFis.read(b, off, maxToRead)
                     if (bytesRead != -1) {
                         totalBytesRead += bytesRead
                         if (!isPartial) {
                             val currentTime = System.currentTimeMillis()
                             if (currentTime - lastUpdateTime >= 500) {
-                                listener.onTransferProgress(target.name, totalBytesRead, dataToDeliver, false)
+                                listener.onTransferProgress(
+                                    target.name,
+                                    totalBytesRead,
+                                    dataToDeliver,
+                                    false
+                                )
                                 lastUpdateTime = currentTime
                             }
                         }
@@ -923,7 +1001,7 @@ class WebDAVServer(
                 }
 
                 override fun close() {
-                    fis.close()
+                    bufferedFis.close()
                     if (!isPartial) {
                         DigestAuthManager.resumeTimer(sessionKey) // ← resume idle countdown
                         listener.onTransferComplete(target.name)
@@ -931,16 +1009,27 @@ class WebDAVServer(
                     super.close()
 
                     if (!isPartial && totalBytesRead < dataToDeliver) {
-                        Log.w(tag, "Transfer failed/interrupted at $totalBytesRead/$dataToDeliver bytes. Safety lock maintained.")
+                        Log.w(
+                            tag,
+                            "Transfer failed/interrupted at $totalBytesRead/$dataToDeliver bytes. Safety lock maintained."
+                        )
                         PersistenceGuard.markStarted(context, path)
                     } else if (!isPartial && totalBytesRead == dataToDeliver) {
-                        Log.d(tag, "Transfer completed successfully. File is now safe to be deleted.")
+                        Log.d(
+                            tag,
+                            "Transfer completed successfully. File is now safe to be deleted."
+                        )
                     }
                 }
             }
 
             val status = if (isPartial) Response.Status.PARTIAL_CONTENT else Response.Status.OK
-            val res    = newFixedLengthResponse(status, "application/octet-stream", fileStream, dataToDeliver)
+            val res = newFixedLengthResponse(
+                status,
+                "application/octet-stream",
+                fileStream,
+                dataToDeliver
+            )
 
             res.addHeader("Accept-Ranges", "bytes")
             res.addHeader("ETag", "\"${target.lastModified()}-${target.length()}\"")
@@ -975,7 +1064,7 @@ class WebDAVServer(
                             childPath.startsWith("$allowed/")
                 }
                 if (isVisible) {
-                    val baseUri  = session.uri.removeSuffix("/")
+                    val baseUri = session.uri.removeSuffix("/")
                     val childUri = "$baseUri/${child.name}"
                     xml.append(getFilePropertiesXml(child, childUri))
                 }
@@ -983,29 +1072,46 @@ class WebDAVServer(
         }
 
         xml.append("</D:multistatus>")
-        return newFixedLengthResponse(Response.Status.lookup(207), "application/xml; charset=utf-8", xml.toString())
+        return newFixedLengthResponse(
+            Response.Status.lookup(207),
+            "application/xml; charset=utf-8",
+            xml.toString()
+        )
     }
 
     private fun getFilePropertiesXml(file: File, uri: String): String {
-        val isDir        = file.isDirectory
-        val sdf          = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss z", Locale.US).apply { timeZone = TimeZone.getTimeZone("GMT") }
-        val creationDate = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("GMT") }.format(Date(file.lastModified()))
-        val etag         = "\"${file.lastModified()}-${file.length()}\""
+        val isDir = file.isDirectory
+        val sdf = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss z", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("GMT")
+        }
+        val creationDate = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("GMT")
+        }.format(Date(file.lastModified()))
+        val etag = "\"${file.lastModified()}-${file.length()}\""
 
-        val safeDisplayName = file.name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        val safeUri         = uri.split("/").joinToString("/") { java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
+        val safeDisplayName =
+            file.name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        val safeUri = uri.split("/")
+            .joinToString("/") { java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
 
-        val androidDir  = File(rootDirectory, "Android").absolutePath
+        val androidDir = File(rootDirectory, "Android").absolutePath
         val currentPath = file.absolutePath
         val isWithinAndroid = currentPath == androidDir || currentPath.startsWith("$androidDir/")
-        val isRootChild     = file.parentFile?.absolutePath == rootDirectory.absolutePath
-        val iconFolders     = listOf("DCIM", "Documents", "Download", "Movies", "Music", "NetworkShare", "Pictures")
+        val isRootChild = file.parentFile?.absolutePath == rootDirectory.absolutePath
+        val iconFolders =
+            listOf("DCIM", "Documents", "Download", "Movies", "Music", "NetworkShare", "Pictures")
 
         val attributes = when {
             isWithinAndroid -> "0x00000004"
-            isDir && isRootChild && iconFolders.any { it.equals(file.name, ignoreCase = true) } -> "0x00000001"
+            isDir && isRootChild && iconFolders.any {
+                it.equals(
+                    file.name,
+                    ignoreCase = true
+                )
+            } -> "0x00000001"
+
             isDir -> "0x00000010"
-            else  -> "0x00000020"
+            else -> "0x00000020"
         }
 
         return """
@@ -1040,6 +1146,12 @@ class WebDAVServer(
 //  Transfer listener interface
 // ─────────────────────────────────────────────────────────────
 interface TransferListener {
-    fun onTransferProgress(fileName: String, currentBytes: Long, totalBytes: Long, isDownload: Boolean)
+    fun onTransferProgress(
+        fileName: String,
+        currentBytes: Long,
+        totalBytes: Long,
+        isDownload: Boolean
+    )
+
     fun onTransferComplete(fileName: String)
 }

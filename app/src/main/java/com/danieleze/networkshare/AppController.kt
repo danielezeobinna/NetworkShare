@@ -700,7 +700,7 @@ class AppControllerService : Service() {
                     controller.pendingLocationCheck ||
                     controller.pendingStorageCheck
 
-            handler.postDelayed(this, if (hasPendingCheck) 1_000L else 10_000L)
+            handler.postDelayed(this, if (hasPendingCheck) 1_000L else 30_000L)
         }
     }
 
@@ -762,7 +762,7 @@ class AppControllerService : Service() {
         super.onCreate()
         isRunning = true
         Log.d("AppControllerService", "STARTED")
-        handler.postDelayed(heartbeat, 10_000L)
+        handler.postDelayed(heartbeat, 30_000L)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
