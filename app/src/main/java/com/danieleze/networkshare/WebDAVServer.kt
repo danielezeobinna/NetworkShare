@@ -780,7 +780,7 @@ class WebDAVServer(
                 else uriPath.replace('/', '\\')
                 val uncFull = "$uncBase$uncSubPath"
 
-                val html = context.assets.open("browsers_instructions.html")
+                val html = context.assets.open("browser_instructions.html")
                     .bufferedReader()
                     .readText()
                     .replace("{{UNC_PATH}}", uncFull)
