@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NetworkShare File Server</title>
+    <link rel="icon" type="image/png" href="ic_ns.png">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f0f2f5;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 24px;
+    }
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.10);
+      max-width: 560px;
+      width: 100%;
+      padding: 40px 36px 32px;
+    }
+    h1 { font-size: 22px; font-weight: 700; color: #1a1a2e; margin-bottom: 10px; }
+    p { font-size: 15px; color: #555; line-height: 1.6; margin-bottom: 16px; }
+    .unc-box {
+      background: #f6f8fa;
+      border: 1.5px solid #d0d7de;
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin: 20px 0;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .unc-path {
+      font-family: "Cascadia Code", "Consolas", "Courier New", monospace;
+      font-size: 14px;
+      color: #1992F0;
+      word-break: break-all;
+      flex: 1;
+      user-select: all;
+    }
+    .copy-btn {
+      background: #1992F0;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 14px;
+      font-size: 13px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s;
+    }
+    .copy-btn:hover { background: #1270c4; }
+    .copy-btn.copied { background: #1a7f37; }
+    .steps {
+      background: rgba(43, 174, 213, 0.1);
+      border-left: 4px solid #1992F0;
+      border-radius: 0 8px 8px 0;
+      padding: 14px 16px;
+      margin-top: 8px;
+    }
+    .steps p { margin-bottom: 6px; color: #555; font-size: 14px; }
+    .steps p:last-child { margin-bottom: 0; }
+    .steps strong { color: #333; }
+    .footer { margin-top: 28px; font-size: 12px; color: #aaa; text-align: center; }
+
+    /* --- DARK MODE --- */
+    @media (prefers-color-scheme: dark) {
+      body { background: #0d1117; }
+      .card {
+        background: #161b22;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+      }
+      h1 { color: #e6edf3; }
+      p { color: #8b949e; }
+      .unc-box {
+        background: #21262d;
+        border-color: #30363d;
+      }
+      .copy-btn:hover { background: #1270c4; }
+      .steps {
+        background: rgba(25, 146, 240, 0.08);
+      }
+      .steps p { color: #8b949e; }
+      .steps strong { color: #c9d1d9; }
+      .footer { color: #484f58; }
+    }
+    </style>
+</head>
+<body>
+<div class="card">
+    <img
+            src="ic_ns.png"
+            alt="NetworkShare logo"
+            style="width: 64px; height: auto;"
+    />
+    <h1>NetworkShare WebDAV File Server</h1>
+    <p>
+        This address belongs to a <strong>NetworkShare WebDAV server</strong> running on your local
+        network.
+        It cannot be browsed directly in a web browser &mdash; you need to open it
+        using <strong>Windows Explorer</strong> or any other WebDAV-compatible client.
+    </p>
+    <p>Copy the network path below and paste it into the address bar of Windows Explorer:</p>
+    <div class="unc-box">
+        <span class="unc-path" id="uncPath">{{UNC_PATH}}</span>
+        <button class="copy-btn" id="copyBtn" onclick="copyPath()">Copy</button>
+    </div>
+    <div class="steps">
+        <p><strong>How to open in Windows Explorer:</strong></p>
+        <p>1. Press <strong>Win + E</strong> to open File Explorer.</p>
+        <p>2. Click the address bar at the top.</p>
+        <p>3. Paste the path above and press <strong>Enter</strong>.</p>
+        <p>4. Enter your username and password when prompted.</p>
+    </div>
+    <div class="footer">WebDAV Server &bull; Access via WebDAV client only</div>
+</div>
+<script>
+    function copyPath() {
+      const text = document.getElementById('uncPath').textContent;
+      const btn  = document.getElementById('copyBtn');
+
+      function onSuccess() {
+        btn.textContent = 'Copied!';
+        btn.classList.add('copied');
+        setTimeout(function() {
+          btn.textContent = 'Copy';
+          btn.classList.remove('copied');
+        }, 2000);
+      }
+
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(onSuccess).catch(fallback);
+      } else {
+        fallback();
+      }
+
+      function fallback() {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none;';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        try {
+          document.execCommand('copy');
+          onSuccess();
+        } catch(e) {
+          const range = document.createRange();
+          range.selectNode(document.getElementById('uncPath'));
+          window.getSelection().removeAllRanges();
+          window.getSelection().addRange(range);
+          btn.textContent = 'Press Ctrl+C';
+          setTimeout(function() { btn.textContent = 'Copy'; }, 3000);
+        }
+        document.body.removeChild(ta);
+      }
+    }
+</script>
+</body>
+</html>
