@@ -35,7 +35,7 @@ import androidx.biometric.BiometricPrompt
 import java.io.File
 
 /**
- * AppController — runs for the entire lifetime the app is open.
+ * AppControl — runs for the entire lifetime the app is open.
  *
  * Responsibilities:
  *  - Android lifecycle (onCreate … onPause)
@@ -49,12 +49,12 @@ import java.io.File
  *
  * MainActivity extends this class and only owns the UI layer.
  */
-abstract class AppController : androidx.fragment.app.FragmentActivity() {
+abstract class AppControl : androidx.fragment.app.FragmentActivity() {
 
     companion object {
         private const val REQ_PIN = 9999
         var isUnlocked by mutableStateOf(false)
-        var instance: AppController? = null
+        var instance: AppControl? = null
     }
 
     // ── State exposed to the UI ───────────────────────────────────────────────
@@ -64,7 +64,7 @@ abstract class AppController : androidx.fragment.app.FragmentActivity() {
     var isPending by mutableStateOf(false); protected set
     var appTheme by mutableStateOf(AppTheme.SYSTEM); protected set
 
-    // Dialog triggers (UI reads these; AppController writes them)
+    // Dialog triggers (UI reads these; AppControl writes them)
     var showLocationOffDialog by mutableStateOf(false)
     var showNetworkDialog by mutableStateOf(false)
     var showUnknownNetworkDialog by mutableStateOf(false)
@@ -132,8 +132,8 @@ abstract class AppController : androidx.fragment.app.FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         instance = this
-        Log.d("AppController", "STARTED — app opened")
-        startService(Intent(this, AppControllerService::class.java))
+        Log.d("AppControl", "STARTED — app opened")
+        startService(Intent(this, AppControlService::class.java))
 
         if (savedInstanceState == null) isUnlocked = false
 
@@ -244,8 +244,8 @@ abstract class AppController : androidx.fragment.app.FragmentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         instance = null
-        Log.d("AppController", "STOPPED — app closed")
-        stopService(Intent(this, AppControllerService::class.java))
+        Log.d("AppControl", "STOPPED — app closed")
+        stopService(Intent(this, AppControlService::class.java))
     }
 
     // ── Authentication ────────────────────────────────────────────────────────
@@ -673,9 +673,9 @@ class CopyFileAddressActivity : Activity() {
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AppControllerService — background service tied to app lifetime.
+// AppControlService — background service tied to app lifetime.
 // ─────────────────────────────────────────────────────────────────────────────
-class AppControllerService : Service() {
+class AppControlService : Service() {
 
     companion object {
         var isRunning = false
@@ -686,10 +686,10 @@ class AppControllerService : Service() {
 
     private val heartbeat = object : Runnable {
         override fun run() {
-            val controller = AppController.instance
+            val controller = AppControl.instance
 
             if (controller == null) {
-                Log.d("AppControllerService", "AppController gone — stopping service")
+                Log.d("AppControlService", "AppControl gone — stopping service")
                 stopSelf()
                 return
             }
@@ -704,13 +704,13 @@ class AppControllerService : Service() {
         }
     }
 
-    private fun checkPendingPermissions(controller: AppController) {
+    private fun checkPendingPermissions(controller: AppControl) {
 
         // Notification permission
         if (controller.pendingNotificationCheck) {
             val notifManager = getSystemService(android.app.NotificationManager::class.java)
             if (notifManager.areNotificationsEnabled()) {
-                Log.d("AppControllerService", "Notification permission granted — returning to app")
+                Log.d("AppControlService", "Notification permission granted — returning to app")
                 controller.pendingNotificationCheck = false
                 controller.showNotificationDialog = false
                 bringAppForward()
@@ -726,7 +726,7 @@ class AppControllerService : Service() {
             val isOn = lm.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER) ||
                     lm.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER)
             if (isOn) {
-                Log.d("AppControllerService", "Location turned on — returning to app")
+                Log.d("AppControlService", "Location turned on — returning to app")
                 controller.pendingLocationCheck = false
                 controller.showLocationOffDialog = false
                 bringAppForward()
@@ -740,11 +740,11 @@ class AppControllerService : Service() {
         if (controller.pendingStorageCheck) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 if (Environment.isExternalStorageManager()) {
-                    Log.d("AppControllerService", "All files access granted — returning to app")
+                    Log.d("AppControlService", "All files access granted — returning to app")
                     controller.pendingStorageCheck = false
                     bringAppForward()
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
-                        AppController.isUnlocked = true
+                        AppControl.isUnlocked = true
                     }
                 }
             }
@@ -761,7 +761,7 @@ class AppControllerService : Service() {
     override fun onCreate() {
         super.onCreate()
         isRunning = true
-        Log.d("AppControllerService", "STARTED")
+        Log.d("AppControlService", "STARTED")
         handler.postDelayed(heartbeat, 30_000L)
     }
 
@@ -773,7 +773,7 @@ class AppControllerService : Service() {
         super.onDestroy()
         isRunning = false
         handler.removeCallbacks(heartbeat)
-        Log.d("AppControllerService", "STOPPED")
+        Log.d("AppControlService", "STOPPED")
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
