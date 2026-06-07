@@ -39,7 +39,7 @@
             android:value="${ADMOB_APP_ID}" />
 
         <receiver
-            android:name=".NetworkTrustActionReceiver"
+            android:name=".NetworkActionReceiver"
             android:exported="false" />
 
         <receiver
