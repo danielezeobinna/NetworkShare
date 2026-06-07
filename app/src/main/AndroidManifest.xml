@@ -39,7 +39,7 @@
             android:value="${ADMOB_APP_ID}" />
 
         <receiver
-            android:name=".NetworkTrustActionReceiver"
+            android:name=".NetworkActionReceiver"
             android:exported="false" />
 
         <receiver
@@ -47,7 +47,7 @@
             android:exported="false" />
 
         <service
-            android:name=".AppControllerService"
+            android:name=".AppControlService"
             android:exported="false" />
 
         <service

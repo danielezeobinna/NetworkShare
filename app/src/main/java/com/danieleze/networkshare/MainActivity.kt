@@ -94,13 +94,13 @@ import java.io.File
 /**
  * MainActivity — owns ONLY the UI.
  *
- * It extends AppController, which handles all background logic and lifecycle.
+ * It extends AppControl, which handles all background logic and lifecycle.
  * This class calls setContent and composes every screen. Nothing else.
  */
-class MainActivity : AppController() {
+class MainActivity : AppControl() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)   // AppController.onCreate runs first
+        super.onCreate(savedInstanceState)   // AppControl.onCreate runs first
         enableEdgeToEdge()
 
         setContent {
@@ -212,10 +212,10 @@ class MainActivity : AppController() {
 
                                                     "allowedNetworks" -> NetworkListScreen(
                                                         title = "Allowed Networks",
-                                                        networks = NetworkTrustManager.allowedNetworks,
+                                                        networks = NetworkManager.allowedNetworks,
                                                         iconRes = R.drawable.ic_wifi,
                                                         onRemove = { ssid ->
-                                                            NetworkTrustManager.remove(
+                                                            NetworkManager.remove(
                                                                 this@MainActivity,
                                                                 ssid
                                                             )
@@ -229,10 +229,10 @@ class MainActivity : AppController() {
 
                                                     "blockedNetworks" -> NetworkListScreen(
                                                         title = "Blocked Networks",
-                                                        networks = NetworkTrustManager.blockedNetworks,
+                                                        networks = NetworkManager.blockedNetworks,
                                                         iconRes = R.drawable.ic_wifi,
                                                         onRemove = { ssid ->
-                                                            NetworkTrustManager.remove(
+                                                            NetworkManager.remove(
                                                                 this@MainActivity,
                                                                 ssid
                                                             )
@@ -1848,7 +1848,7 @@ fun LocationOffDialog(show: Boolean, appTheme: AppTheme, onDismiss: () -> Unit) 
                     )
                     TextButton(onClick = {
                         onDismiss()
-                        (context as? AppController)?.pendingLocationCheck = true
+                        (context as? AppControl)?.pendingLocationCheck = true
                         context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS).apply {
                             addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY)
                         })
@@ -1909,11 +1909,11 @@ fun UnknownNetworkDialog(show: Boolean, ssid: String?, appTheme: AppTheme, onDis
                     Spacer(modifier = Modifier.height(24.dp))
                     Column(modifier = Modifier.fillMaxWidth()) {
                         TextButton(onClick = {
-                            NetworkTrustManager.allow(
+                            NetworkManager.allow(
                                 context,
                                 ssid
                             ); WebDAVService.pendingTrustSsid.value =
-                            null; NetworkTrustManager.restoreSharingNotification(context); onDismiss()
+                            null; context.startService(Intent(context, WebDAVService::class.java).apply { action = "RESTORE_NOTIFICATION" }); onDismiss()
                         }, modifier = Modifier.fillMaxWidth()) {
                             Text(
                                 "Allow",
@@ -1922,8 +1922,8 @@ fun UnknownNetworkDialog(show: Boolean, ssid: String?, appTheme: AppTheme, onDis
                             )
                         }
                         TextButton(onClick = {
-                            NetworkTrustManager.allowOnce(ssid); WebDAVService.pendingTrustSsid.value =
-                            null; NetworkTrustManager.restoreSharingNotification(context); onDismiss()
+                            NetworkManager.allowOnce(ssid); WebDAVService.pendingTrustSsid.value =
+                            null; context.startService(Intent(context, WebDAVService::class.java).apply { action = "RESTORE_NOTIFICATION" }); onDismiss()
                         }, modifier = Modifier.fillMaxWidth()) {
                             Text(
                                 "Allow Once",
@@ -1932,11 +1932,11 @@ fun UnknownNetworkDialog(show: Boolean, ssid: String?, appTheme: AppTheme, onDis
                             )
                         }
                         TextButton(onClick = {
-                            NetworkTrustManager.block(
+                            NetworkManager.block(
                                 context,
                                 ssid
                             ); WebDAVService.pendingTrustSsid.value =
-                            null; NetworkTrustManager.restoreSharingNotification(context); onDismiss()
+                            null; context.startService(Intent(context, WebDAVService::class.java).apply { action = "RESTORE_NOTIFICATION" }); onDismiss()
                         }, modifier = Modifier.fillMaxWidth()) {
                             Text(
                                 "Block",
@@ -2101,7 +2101,7 @@ fun NotificationPermissionDialog(show: Boolean, appTheme: AppTheme, onDismiss: (
                     )
                     TextButton(onClick = {
                         onDismiss()
-                        (context as? AppController)?.pendingNotificationCheck = true
+                        (context as? AppControl)?.pendingNotificationCheck = true
                         context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
                             putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
                         })

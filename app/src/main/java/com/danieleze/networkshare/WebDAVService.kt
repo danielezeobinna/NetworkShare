@@ -17,6 +17,13 @@ import android.annotation.SuppressLint
 import android.app.NotificationManager
 import java.util.Collections
 import android.os.Build
+import android.app.NotificationChannel
+import android.app.PendingIntent
+import com.danieleze.networkshare.NetworkManager.ACTION_ALLOW
+import com.danieleze.networkshare.NetworkManager.ACTION_ALLOW_ONCE
+import com.danieleze.networkshare.NetworkManager.ACTION_BLOCK
+import com.danieleze.networkshare.NetworkManager.CHANNEL_ID
+import com.danieleze.networkshare.NetworkManager.EXTRA_SSID
 
 data class FolderItem(
     val file: File,
@@ -90,6 +97,11 @@ class WebDAVService : Service(), TransferListener {
             return START_STICKY
         }
 
+        if (intent?.action == "RESTORE_NOTIFICATION") {
+            restoreSharingNotification(this)
+            return START_STICKY
+        }
+
         if (intent?.action == "RESTART_SERVERS") {
             // Full server restart — used by pull-to-refresh
             isStartingServers = false  // reset guard in case a previous call was stuck
@@ -98,7 +110,7 @@ class WebDAVService : Service(), TransferListener {
         }
 
         createNotificationChannel()
-        NetworkTrustManager.ensureChannel(      // ← add this
+        ensureChannel(
             getSystemService(NotificationManager::class.java)
         )
 
@@ -174,6 +186,164 @@ class WebDAVService : Service(), TransferListener {
         broadcastCurrentAddresses()
 
         return START_STICKY
+    }
+
+    // ── Notification ─────────────────────────────────────────
+
+    fun showTrustNotification(context: Context, ssid: String, silent: Boolean = false) {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        ensureChannel(manager)
+
+        fun pendingFor(action: String): PendingIntent {
+            val i = Intent(context, NetworkActionReceiver::class.java).apply {
+                this.action = action
+                putExtra(EXTRA_SSID, ssid)
+            }
+            return PendingIntent.getBroadcast(
+                context,
+                ssid.hashCode() xor action.hashCode(),
+                i,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_stat_name)
+            .setContentTitle("Unknown Network Detected")
+            .setContentText("\"$ssid\" is unknown. Allow file sharing on this network?")
+            .setShowWhen(false)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setOngoing(true)
+            .setColor("#2BAED5".toColorInt())
+            .setAutoCancel(false)
+            .also { if (silent) it.setSilent(true) }
+            .addAction(0, "Allow",      pendingFor(ACTION_ALLOW))
+            .addAction(0, "Allow Once", pendingFor(ACTION_ALLOW_ONCE))
+            .addAction(0, "Block",      pendingFor(ACTION_BLOCK))
+            .build()
+
+        // ID 1 — replaces the "Network sharing is on" notification
+        manager?.notify(1, notification)
+    }
+
+    fun showNoNetworkNotification(context: Context) {
+        val manager = context.getSystemService(NotificationManager::class.java)
+
+        val contentIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        val contentPendingIntent = PendingIntent.getActivity(
+            context, 1, contentIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val stopIntent = Intent(context, WebDAVService::class.java).apply {
+            action = "STOP_SERVICE"
+        }
+        val stopPendingIntent = PendingIntent.getService(
+            context, 0, stopIntent,
+            PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(context, "WebDAV_Service_Channel")
+            .setSmallIcon(R.drawable.ic_stat_name)
+            .setColor(android.graphics.Color.GRAY)
+            .setContentTitle("Network sharing is turned on")
+            .setContentText("No network available. Connect or create a network to start sharing.")
+            .setOngoing(true)
+            .setSilent(true)
+            .setShowWhen(false)
+            .setContentIntent(contentPendingIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "TURN OFF", stopPendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+
+        manager?.notify(1, notification)
+    }
+
+    fun showBlockedNetworkNotification(context: Context) {
+        val manager = context.getSystemService(NotificationManager::class.java)
+
+        val contentIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        val contentPendingIntent = PendingIntent.getActivity(
+            context, 1, contentIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val stopIntent = Intent(context, WebDAVService::class.java).apply {
+            action = "STOP_SERVICE"
+        }
+        val stopPendingIntent = PendingIntent.getService(
+            context, 0, stopIntent,
+            PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(context, "WebDAV_Service_Channel")
+            .setSmallIcon(R.drawable.ic_stat_name)
+            .setColor(android.graphics.Color.GRAY)
+            .setContentTitle("Network sharing is turned on")
+            .setContentText("This is a blocked network. Allow this network or connect to a trusted network to start sharing.")
+            .setOngoing(true)
+            .setSilent(true)
+            .setShowWhen(false)
+            .setContentIntent(contentPendingIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "TURN OFF", stopPendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+
+        manager?.notify(1, notification)
+    }
+
+    fun restoreSharingNotification(context: Context) {
+        val manager = context.getSystemService(NotificationManager::class.java)
+
+        val contentIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        val contentPendingIntent = PendingIntent.getActivity(
+            context, 1, contentIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val stopIntent = Intent(context, WebDAVService::class.java).apply {
+            action = "STOP_SERVICE"
+        }
+        val stopPendingIntent = PendingIntent.getService(
+            context, 0, stopIntent,
+            PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(context, "WebDAV_Service_Channel")
+            .setSmallIcon(R.drawable.ic_stat_name)
+            .setContentTitle("Network sharing is turned on")
+            .setContentText("Your phone can be accessed by other devices on this network")
+            .setShowWhen(false)
+            .setOngoing(true)
+            .setColor("#2BAED5".toColorInt())
+            .setContentIntent(contentPendingIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "TURN OFF", stopPendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setSilent(true)
+            .build()
+
+        manager?.notify(1, notification)
+    }
+
+    fun ensureChannel(manager: NotificationManager?) {
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "Network Trust Alerts",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "Alerts when connecting to an unknown WiFi network"
+            enableVibration(true)
+            vibrationPattern = longArrayOf(0, 250, 250, 250)
+            enableLights(true)
+        }
+        manager?.createNotificationChannel(channel)
     }
 
     fun showSafetyAlert(fileName: String) {
@@ -267,8 +437,8 @@ class WebDAVService : Service(), TransferListener {
         activeServers.clear()
 
         // ← add this block
-        NetworkTrustManager.load(this)          // ← move to top of startWebDAVServers()
-        NetworkTrustManager.ensureChannel(
+        NetworkManager.load(this)          // ← move to top of startWebDAVServers()
+        ensureChannel(
             getSystemService(NotificationManager::class.java)
         )
 
@@ -424,15 +594,15 @@ class WebDAVService : Service(), TransferListener {
                         Log.d(tag, "NetworkCallback SSID: $ssid")
 
                         // ← add this block
-                        if (!NetworkTrustManager.isHotspot(ssid)) {
-                            when (NetworkTrustManager.getTrust(ssid)) {
-                                NetworkTrustManager.Trust.UNKNOWN -> {
+                        if (!NetworkManager.isHotspot(ssid)) {
+                            when (NetworkManager.getTrust(ssid)) {
+                                NetworkManager.Trust.UNKNOWN -> {
                                     Log.d(tag, "Unknown network — showing notification for: $ssid")
                                     val silent = isAppInForeground()
                                     pendingTrustSsid.value = ssid
-                                    NetworkTrustManager.showTrustNotification(this@WebDAVService, ssid, silent)
+                                    showTrustNotification(this@WebDAVService, ssid, silent)
                                 }
-                                NetworkTrustManager.Trust.BLOCKED -> {
+                                NetworkManager.Trust.BLOCKED -> {
                                     Log.d(tag, "Blocked network: $ssid — server will return 403")
                                 }
                                 else -> {
@@ -470,15 +640,15 @@ class WebDAVService : Service(), TransferListener {
                         updateNetworkTrust()
 
                         // ← add this block
-                        if (!NetworkTrustManager.isHotspot(ssid)) {
-                            when (NetworkTrustManager.getTrust(ssid)) {
-                                NetworkTrustManager.Trust.UNKNOWN -> {
+                        if (!NetworkManager.isHotspot(ssid)) {
+                            when (NetworkManager.getTrust(ssid)) {
+                                NetworkManager.Trust.UNKNOWN -> {
                                     Log.d(tag, "Unknown network — showing notification for: $ssid")
                                     val silent = isAppInForeground()
                                     pendingTrustSsid.value = ssid
-                                    NetworkTrustManager.showTrustNotification(this@WebDAVService, ssid, silent)
+                                    showTrustNotification(this@WebDAVService, ssid, silent)
                                 }
-                                NetworkTrustManager.Trust.BLOCKED -> {
+                                NetworkManager.Trust.BLOCKED -> {
                                     Log.d(tag, "Blocked network: $ssid — server will return 403")
                                 }
                                 else -> Log.d(tag, "Trusted network: $ssid")
@@ -570,7 +740,7 @@ class WebDAVService : Service(), TransferListener {
             isNetworkTrusted.value = true
             networkState.value = NetworkState.TRUSTED
             if (activeServers.isNotEmpty()) {
-                NetworkTrustManager.restoreSharingNotification(this)
+                restoreSharingNotification(this)
             }
             Log.d(tag, "Hotspot active — always trusted")
             return
@@ -593,7 +763,7 @@ class WebDAVService : Service(), TransferListener {
             wifiManager.connectionInfo.ssid?.removeSurrounding("\"") ?: ""
         }
 
-        Log.d(tag, "WLAN — SSID: '$ssid' | trust: ${NetworkTrustManager.getTrust(ssid)}")
+        Log.d(tag, "WLAN — SSID: '$ssid' | trust: ${NetworkManager.getTrust(ssid)}")
 
         when {
             ssid.isBlank() || ssid == "<unknown ssid>" -> {
@@ -606,31 +776,31 @@ class WebDAVService : Service(), TransferListener {
                 isNetworkTrusted.value = false
                 networkState.value = NetworkState.NO_NETWORK
                 if (activeServers.isNotEmpty()) {
-                    NetworkTrustManager.showNoNetworkNotification(this)
+                    showNoNetworkNotification(this)
                 }
             }
 
-            NetworkTrustManager.isHotspot(ssid) -> {
+            NetworkManager.isHotspot(ssid) -> {
                 isNetworkTrusted.value = true
                 networkState.value = NetworkState.TRUSTED
             }
 
-            NetworkTrustManager.getTrust(ssid) == NetworkTrustManager.Trust.ALLOWED ||
-                    NetworkTrustManager.getTrust(ssid) == NetworkTrustManager.Trust.ALLOW_ONCE -> {
+            NetworkManager.getTrust(ssid) == NetworkManager.Trust.ALLOWED ||
+                    NetworkManager.getTrust(ssid) == NetworkManager.Trust.ALLOW_ONCE -> {
                 isNetworkTrusted.value = true
                 networkState.value = NetworkState.TRUSTED
                 if (activeServers.isNotEmpty()) {
-                    NetworkTrustManager.restoreSharingNotification(this)
+                    restoreSharingNotification(this)
                 }
             }
 
             else -> {
                 isNetworkTrusted.value = false
                 networkState.value = NetworkState.UNTRUSTED
-                if (NetworkTrustManager.getTrust(ssid) == NetworkTrustManager.Trust.BLOCKED) {
-                    NetworkTrustManager.showBlockedNetworkNotification(this)
+                if (NetworkManager.getTrust(ssid) == NetworkManager.Trust.BLOCKED) {
+                    showBlockedNetworkNotification(this)
                 } else if (activeServers.isNotEmpty()) {
-                    NetworkTrustManager.showNoNetworkNotification(this)
+                    showNoNetworkNotification(this)
                 }
             }
         }
@@ -642,7 +812,7 @@ class WebDAVService : Service(), TransferListener {
                 networkState.value = NetworkState.NO_NETWORK
                 isNetworkTrusted.value = false
                 if (activeServers.isNotEmpty()) {
-                    NetworkTrustManager.showNoNetworkNotification(this)
+                    showNoNetworkNotification(this)
                 }
                 broadcastCurrentAddresses()
             } else {
@@ -672,7 +842,7 @@ class WebDAVService : Service(), TransferListener {
                 cm.unregisterNetworkCallback(it)
             } catch (_: Exception) {}
         }
-        NetworkTrustManager.allowOnceNetworks.clear()  // ← add this
+        NetworkManager.allowOnceNetworks.clear()  // ← add this
         wakeLock?.let { if (it.isHeld) it.release() }
         wifiLock?.let { if (it.isHeld) it.release() }
         super.onDestroy()
