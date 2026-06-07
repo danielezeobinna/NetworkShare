@@ -348,8 +348,6 @@ object NetworkManager {
         } catch (_: Exception) { false }
 
         if (isOnHotspot) {
-            WebDAVService.isNetworkTrusted.value = true
-            WebDAVService.networkState.value = NetworkState.TRUSTED
             eventListener?.onNetworkTrustChanged(NetworkState.TRUSTED, "")
             Log.d(TAG, "Hotspot active — always trusted")
             return
@@ -381,26 +379,18 @@ object NetworkManager {
                     context.sendBroadcast(locationIntent)
                     onWifiJustEnabledConsumed()
                 }
-                WebDAVService.isNetworkTrusted.value = false
-                WebDAVService.networkState.value = NetworkState.NO_NETWORK
                 eventListener?.onNetworkTrustChanged(NetworkState.NO_NETWORK, ssid)
             }
 
             isHotspot(ssid) -> {
-                WebDAVService.isNetworkTrusted.value = true
-                WebDAVService.networkState.value = NetworkState.TRUSTED
                 eventListener?.onNetworkTrustChanged(NetworkState.TRUSTED, ssid)
             }
 
             getTrust(ssid) == Trust.ALLOWED || getTrust(ssid) == Trust.ALLOW_ONCE -> {
-                WebDAVService.isNetworkTrusted.value = true
-                WebDAVService.networkState.value = NetworkState.TRUSTED
                 eventListener?.onNetworkTrustChanged(NetworkState.TRUSTED, ssid)
             }
 
             else -> {
-                WebDAVService.isNetworkTrusted.value = false
-                WebDAVService.networkState.value = NetworkState.UNTRUSTED
                 eventListener?.onNetworkTrustChanged(NetworkState.UNTRUSTED, ssid)
             }
         }
@@ -409,8 +399,6 @@ object NetworkManager {
     fun verifyAndStop() {
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
             if (!isNetworkAvailable()) {
-                WebDAVService.networkState.value = NetworkState.NO_NETWORK
-                WebDAVService.isNetworkTrusted.value = false
                 eventListener?.onNetworkTrustChanged(NetworkState.NO_NETWORK, "")
             } else {
                 eventListener?.onRefreshServersIfNeeded()
@@ -430,15 +418,10 @@ class NetworkActionReceiver : BroadcastReceiver() {
             NetworkManager.ACTION_ALLOW_ONCE -> NetworkManager.allowOnce(ssid)
             NetworkManager.ACTION_BLOCK      -> NetworkManager.block(context, ssid)
         }
-        // Clear pending trust so dialog doesn't re-trigger
-        WebDAVService.pendingTrustSsid.value = null
-        // Restore the "Network sharing is on" notification
-        (context.applicationContext as? WebDAVService)?.restoreSharingNotification(context)
-            ?: run {
-                val restoreIntent = Intent(context, WebDAVService::class.java).apply {
-                    action = "RESTORE_NOTIFICATION"
-                }
-                context.startService(restoreIntent)
+        context.startService(
+            Intent(context, WebDAVService::class.java).apply {
+                action = "RESTORE_NOTIFICATION"
             }
+        )
     }
 }

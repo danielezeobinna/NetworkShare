@@ -43,6 +43,8 @@ class WebDAVService : Service(), TransferListener, NetworkManager.NetworkEventLi
     // NetworkManager calls these when network state changes.
 
     override fun onNetworkTrustChanged(state: NetworkState, ssid: String) {
+        isNetworkTrusted.value = state == NetworkState.TRUSTED
+        networkState.value = state
         when (state) {
             NetworkState.TRUSTED -> {
                 if (activeServers.isNotEmpty()) restoreSharingNotification(this)
@@ -110,6 +112,7 @@ class WebDAVService : Service(), TransferListener, NetworkManager.NetworkEventLi
         }
 
         if (intent?.action == "RESTORE_NOTIFICATION") {
+            pendingTrustSsid.value = null
             restoreSharingNotification(this)
             return START_STICKY
         }
