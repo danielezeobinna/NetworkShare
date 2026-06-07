@@ -212,10 +212,10 @@ class MainActivity : AppControl() {
 
                                                     "allowedNetworks" -> NetworkListScreen(
                                                         title = "Allowed Networks",
-                                                        networks = NetworkManager.allowedNetworks,
+                                                        networks = NetworkTrustManager.allowedNetworks,
                                                         iconRes = R.drawable.ic_wifi,
                                                         onRemove = { ssid ->
-                                                            NetworkManager.remove(
+                                                            NetworkTrustManager.remove(
                                                                 this@MainActivity,
                                                                 ssid
                                                             )
@@ -229,10 +229,10 @@ class MainActivity : AppControl() {
 
                                                     "blockedNetworks" -> NetworkListScreen(
                                                         title = "Blocked Networks",
-                                                        networks = NetworkManager.blockedNetworks,
+                                                        networks = NetworkTrustManager.blockedNetworks,
                                                         iconRes = R.drawable.ic_wifi,
                                                         onRemove = { ssid ->
-                                                            NetworkManager.remove(
+                                                            NetworkTrustManager.remove(
                                                                 this@MainActivity,
                                                                 ssid
                                                             )
@@ -1909,11 +1909,11 @@ fun UnknownNetworkDialog(show: Boolean, ssid: String?, appTheme: AppTheme, onDis
                     Spacer(modifier = Modifier.height(24.dp))
                     Column(modifier = Modifier.fillMaxWidth()) {
                         TextButton(onClick = {
-                            NetworkManager.allow(
+                            NetworkTrustManager.allow(
                                 context,
                                 ssid
                             ); WebDAVService.pendingTrustSsid.value =
-                            null; context.startService(Intent(context, WebDAVService::class.java).apply { action = "RESTORE_NOTIFICATION" }); onDismiss()
+                            null; NetworkTrustManager.restoreSharingNotification(context); onDismiss()
                         }, modifier = Modifier.fillMaxWidth()) {
                             Text(
                                 "Allow",
@@ -1922,8 +1922,8 @@ fun UnknownNetworkDialog(show: Boolean, ssid: String?, appTheme: AppTheme, onDis
                             )
                         }
                         TextButton(onClick = {
-                            NetworkManager.allowOnce(ssid); WebDAVService.pendingTrustSsid.value =
-                            null; context.startService(Intent(context, WebDAVService::class.java).apply { action = "RESTORE_NOTIFICATION" }); onDismiss()
+                            NetworkTrustManager.allowOnce(ssid); WebDAVService.pendingTrustSsid.value =
+                            null; NetworkTrustManager.restoreSharingNotification(context); onDismiss()
                         }, modifier = Modifier.fillMaxWidth()) {
                             Text(
                                 "Allow Once",
@@ -1932,11 +1932,11 @@ fun UnknownNetworkDialog(show: Boolean, ssid: String?, appTheme: AppTheme, onDis
                             )
                         }
                         TextButton(onClick = {
-                            NetworkManager.block(
+                            NetworkTrustManager.block(
                                 context,
                                 ssid
                             ); WebDAVService.pendingTrustSsid.value =
-                            null; context.startService(Intent(context, WebDAVService::class.java).apply { action = "RESTORE_NOTIFICATION" }); onDismiss()
+                            null; NetworkTrustManager.restoreSharingNotification(context); onDismiss()
                         }, modifier = Modifier.fillMaxWidth()) {
                             Text(
                                 "Block",
