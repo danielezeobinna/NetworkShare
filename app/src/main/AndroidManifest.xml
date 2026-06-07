@@ -47,7 +47,7 @@
             android:exported="false" />
 
         <service
-            android:name=".AppControlService"
+            android:name=".AppControllerService"
             android:exported="false" />
 
         <service

@@ -94,13 +94,13 @@ import java.io.File
 /**
  * MainActivity — owns ONLY the UI.
  *
- * It extends AppControl, which handles all background logic and lifecycle.
+ * It extends AppController, which handles all background logic and lifecycle.
  * This class calls setContent and composes every screen. Nothing else.
  */
-class MainActivity : AppControl() {
+class MainActivity : AppController() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)   // AppControl.onCreate runs first
+        super.onCreate(savedInstanceState)   // AppController.onCreate runs first
         enableEdgeToEdge()
 
         setContent {
@@ -1848,7 +1848,7 @@ fun LocationOffDialog(show: Boolean, appTheme: AppTheme, onDismiss: () -> Unit) 
                     )
                     TextButton(onClick = {
                         onDismiss()
-                        (context as? AppControl)?.pendingLocationCheck = true
+                        (context as? AppController)?.pendingLocationCheck = true
                         context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS).apply {
                             addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY)
                         })
@@ -2101,7 +2101,7 @@ fun NotificationPermissionDialog(show: Boolean, appTheme: AppTheme, onDismiss: (
                     )
                     TextButton(onClick = {
                         onDismiss()
-                        (context as? AppControl)?.pendingNotificationCheck = true
+                        (context as? AppController)?.pendingNotificationCheck = true
                         context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
                             putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
                         })
