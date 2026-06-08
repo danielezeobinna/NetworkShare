@@ -537,7 +537,7 @@ fun DiscoveryScreen(
                             MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                     ) {
                         val addressLines = addresses.split("\n").filter { it.isNotBlank() }
-                        val noPaths = WebDAVService.selectedPaths.isEmpty()
+                        val noPaths = FileManager.selectedPaths.isEmpty()
                         val displayLines = if (networkState != NetworkState.TRUSTED) {
                             val grouped = mutableListOf<String>()
                             var count = 0
@@ -1114,7 +1114,7 @@ fun FilePickerSection(
                 currentPath =
                     if (storages.any { it.absolutePath == currentPath?.absolutePath }) null
                     else currentPath?.parentFile
-                WebDAVService.scannedItems.clear()
+                FileManager.scannedItems.clear()
             }
         }
     }
@@ -1128,17 +1128,17 @@ fun FilePickerSection(
         parts
     }
 
-    val itemsToShow = WebDAVService.scannedItems.sortedBy { it.name.lowercase() }
-    val isLoading = WebDAVService.isScanning.value
+    val itemsToShow = FileManager.scannedItems.sortedBy { it.name.lowercase() }
+    val isLoading = FileManager.isScanning.value
 
     LaunchedEffect(currentPath) {
         if (currentPath == null) {
-            WebDAVService.scannedItems.clear()
-            WebDAVService.scannedItems.addAll(
+            FileManager.scannedItems.clear()
+            FileManager.scannedItems.addAll(
                 activity.getAvailableStorages().map { FolderItem(it, it.name, true) }
             )
         } else {
-            WebDAVService.requestFolderScan(currentPath)
+            FileManager.requestFolderScan(currentPath)
         }
     }
 
@@ -1192,7 +1192,7 @@ fun FilePickerSection(
                                         scope.launch {
                                             isExiting = true; delay(220); isExiting =
                                             false; currentPath =
-                                            null; WebDAVService.scannedItems.clear()
+                                            null; FileManager.scannedItems.clear()
                                         }
                                     }
                                 }
@@ -1229,7 +1229,7 @@ fun FilePickerSection(
                                             scope.launch {
                                                 isExiting = true; delay(220); isExiting =
                                                 false; currentPath =
-                                                file; WebDAVService.scannedItems.clear()
+                                                file; FileManager.scannedItems.clear()
                                             }
                                         }
                                     )
@@ -1334,16 +1334,16 @@ fun StorageRow(
 ) {
     val isDark = LocalDarkTheme.current
     val context = LocalContext.current
-    val isChecked = remember(fullPath, WebDAVService.selectedPaths.size) {
-        WebDAVService.selectedPaths.contains(fullPath)
+    val isChecked = remember(fullPath, FileManager.selectedPaths.size) {
+        FileManager.selectedPaths.contains(fullPath)
     }
-    val isInherited = remember(fullPath, WebDAVService.selectedPaths.size) {
-        WebDAVService.selectedPaths.any { shared -> fullPath.startsWith("$shared/") && fullPath != shared }
+    val isInherited = remember(fullPath, FileManager.selectedPaths.size) {
+        FileManager.selectedPaths.any { shared -> fullPath.startsWith("$shared/") && fullPath != shared }
     }
     val inheritedColor = if (isDark) Color.Gray else Color.LightGray
     val inheritedCheck = if (isDark) Color.LightGray else Color.White
-    val isPartiallyChecked = remember(fullPath, WebDAVService.selectedPaths.size) {
-        !isChecked && !isInherited && WebDAVService.selectedPaths.any { shared ->
+    val isPartiallyChecked = remember(fullPath, FileManager.selectedPaths.size) {
+        !isChecked && !isInherited && FileManager.selectedPaths.any { shared ->
             shared.startsWith(
                 "$fullPath/"
             ) && shared != fullPath
@@ -1420,7 +1420,7 @@ fun StorageRow(
                 )
                 .clickable {
                     if (!isInherited) {
-                        WebDAVService.toggleSelection(context, fullPath)
+                        FileManager.toggleSelection(context, fullPath)
                         if (WebDAVService.isRunning) {
                             context.startService(
                                 Intent(

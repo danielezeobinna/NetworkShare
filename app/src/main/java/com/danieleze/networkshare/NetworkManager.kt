@@ -221,8 +221,7 @@ object NetworkManager {
     fun registerNetworkCallback(
         context: Context,
         onSsidChanged: (ssid: String) -> Unit,
-        onNetworkLost: () -> Unit,
-        isAppInForeground: () -> Boolean
+        onNetworkLost: () -> Unit
     ) {
         val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE)
                 as android.net.ConnectivityManager
@@ -250,7 +249,7 @@ object NetworkManager {
                             when (getTrust(ssid)) {
                                 Trust.UNKNOWN -> {
                                     Log.d(TAG, "Unknown network — showing notification for: $ssid")
-                                    val silent = isAppInForeground()
+                                    val silent = isAppInForeground(context)
                                     eventListener?.onUnknownNetworkDetected(ssid, silent)
                                 }
                                 Trust.BLOCKED -> {
@@ -293,7 +292,7 @@ object NetworkManager {
                             when (getTrust(ssid)) {
                                 Trust.UNKNOWN -> {
                                     Log.d(TAG, "Unknown network — showing notification for: $ssid")
-                                    val silent = isAppInForeground()
+                                    val silent = isAppInForeground(context)
                                     eventListener?.onUnknownNetworkDetected(ssid, silent)
                                 }
                                 Trust.BLOCKED -> {

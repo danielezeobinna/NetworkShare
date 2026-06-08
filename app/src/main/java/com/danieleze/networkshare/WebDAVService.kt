@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.os.IBinder
 import android.util.Log
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.graphics.toColorInt
 import androidx.core.app.NotificationCompat
@@ -22,12 +21,6 @@ import com.danieleze.networkshare.NetworkManager.ACTION_ALLOW_ONCE
 import com.danieleze.networkshare.NetworkManager.ACTION_BLOCK
 import com.danieleze.networkshare.NetworkManager.CHANNEL_ID
 import com.danieleze.networkshare.NetworkManager.EXTRA_SSID
-
-data class FolderItem(
-    val file: File,
-    val name: String,
-    val hasSubFolders: Boolean
-)
 
 class WebDAVService : Service(), TransferListener, NetworkManager.NetworkEventListener {
     private var currentSsid: String = ""
@@ -104,7 +97,7 @@ class WebDAVService : Service(), TransferListener, NetworkManager.NetworkEventLi
         }
 
         if (intent?.action == "REFRESH_INFO") {
-            if (activeServers.isEmpty() && selectedPaths.isNotEmpty()) {
+            if (activeServers.isEmpty() && FileManager.selectedPaths.isNotEmpty()) {
                 startWebDAVServers()
             }
             broadcastCurrentAddresses()
@@ -204,8 +197,7 @@ class WebDAVService : Service(), TransferListener, NetworkManager.NetworkEventLi
                     wifiJustEnabled           = wifiJustEnabled,
                     onWifiJustEnabledConsumed = { wifiJustEnabled = false }
                 )
-            },
-            isAppInForeground = { NetworkManager.isAppInForeground(this) }
+            }
         )
 
         broadcastCurrentAddresses()
@@ -283,7 +275,7 @@ class WebDAVService : Service(), TransferListener, NetworkManager.NetworkEventLi
         val boundIp = NetworkManager.getLocalIpAddress() ?: "0.0.0.0"
 
         roots.forEach { root ->
-            val allowedInThisRoot = selectedPaths.filter { it.startsWith(root.absolutePath) }
+            val allowedInThisRoot = FileManager.selectedPaths.filter { it.startsWith(root.absolutePath) }
 
             if (allowedInThisRoot.isNotEmpty() && nextPort <= maxPort) {
                 while (isPortBusy(nextPort) && nextPort <= maxPort) {
@@ -334,11 +326,11 @@ class WebDAVService : Service(), TransferListener, NetworkManager.NetworkEventLi
                 else -> "SD Card (${server.rootDirectory.name})"
             }
 
-            selectedPaths.filter { it.startsWith(rootPath) }.forEach { path ->
+            FileManager.selectedPaths.filter { it.startsWith(rootPath) }.forEach { path ->
                 val folder = File(path)
                 val isRoot = path == rootPath
                 val relativePath = path.removePrefix(rootPath).trimStart('/')
-                val isTempVip = path == tempPriorityPath
+                val isTempVip = path == FileManager.tempPriorityPath
 
                 addressList.add(AddressItem(
                     label = storageLabel,
@@ -631,10 +623,6 @@ class WebDAVService : Service(), TransferListener, NetworkManager.NetworkEventLi
         var pendingTrustSsid = mutableStateOf<String?>(null)
         var username = mutableStateOf("user")
         var password = mutableStateOf("pass")
-        var scannedItems = mutableStateListOf<FolderItem>()
-        var isScanning = mutableStateOf(false)
-        var selectedPaths = mutableStateListOf<String>()
-        var tempPriorityPath: String? = null
 
         private val cancelledFiles = Collections.synchronizedSet(mutableSetOf<String>())
 
@@ -655,7 +643,7 @@ class WebDAVService : Service(), TransferListener, NetworkManager.NetworkEventLi
                 putBoolean("auth_enabled", isAuthEnabled.value)
                 putString("username", username.value)
                 putString("password", password.value)
-                putStringSet("shared_paths", selectedPaths.toSet())
+                putStringSet("shared_paths", FileManager.selectedPaths.toSet())
             }
         }
 
@@ -665,9 +653,9 @@ class WebDAVService : Service(), TransferListener, NetworkManager.NetworkEventLi
             username.value = prefs.getString("username", "user") ?: "user"
             password.value = prefs.getString("password", "pass") ?: "pass"
             val saved = prefs.getStringSet("shared_paths", null)
-            selectedPaths.clear()
+            FileManager.selectedPaths.clear()
             if (saved != null) {
-                selectedPaths.addAll(saved)
+                FileManager.selectedPaths.addAll(saved)
             } else {
                 val internalRoot = android.os.Environment.getExternalStorageDirectory()
                 val defaultFolderNames = listOf(
@@ -678,40 +666,9 @@ class WebDAVService : Service(), TransferListener, NetworkManager.NetworkEventLi
                     .map { File(internalRoot, it) }
                     .filter { it.exists() && it.isDirectory }
                     .map { it.absolutePath }
-                selectedPaths.addAll(defaults)
+                FileManager.selectedPaths.addAll(defaults)
                 savePaths(context)
             }
-        }
-
-        fun toggleSelection(context: Context, path: String) {
-            val parentPath = selectedPaths.firstOrNull { path.startsWith("$it/") && path != it }
-            if (parentPath != null) return
-            if (selectedPaths.contains(path)) selectedPaths.remove(path)
-            else selectedPaths.add(path)
-            savePaths(context)
-        }
-
-        fun requestFolderScan(directory: File?) {
-            if (directory == null) return
-            isScanning.value = true
-            Thread {
-                try {
-                    val items = directory.listFiles()?.filter { it.isDirectory }?.map {
-                        FolderItem(
-                            file = it,
-                            name = it.name,
-                            hasSubFolders = it.listFiles()?.any { sub -> sub.isDirectory } ?: false
-                        )
-                    } ?: emptyList()
-                    android.os.Handler(android.os.Looper.getMainLooper()).post {
-                        scannedItems.clear()
-                        scannedItems.addAll(items)
-                        isScanning.value = false
-                    }
-                } catch (_: Exception) {
-                    isScanning.value = false
-                }
-            }.start()
         }
     }
 }

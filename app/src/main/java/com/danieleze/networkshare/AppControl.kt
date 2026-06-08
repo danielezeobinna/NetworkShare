@@ -513,11 +513,11 @@ abstract class AppControl : androidx.fragment.app.FragmentActivity() {
             contentResolver.openInputStream(uri)?.use { it.copyTo(destFile.outputStream()) }
 
             val path = networkShareDir.absolutePath
-            if (!WebDAVService.selectedPaths.contains(path)) {
-                WebDAVService.selectedPaths.add(path)
+            if (!FileManager.selectedPaths.contains(path)) {
+                FileManager.selectedPaths.add(path)
                 WebDAVService.savePaths(this)
             }
-            WebDAVService.tempPriorityPath = path
+            FileManager.tempPriorityPath = path
 
             Toast.makeText(this, "Shared on NetworkShare", Toast.LENGTH_SHORT).show()
             startService(Intent(this, WebDAVService::class.java).apply { action = "REFRESH_INFO" })
@@ -615,7 +615,7 @@ class CopyFileAddressActivity : Activity() {
     }
 
     private fun buildUrl(realPath: String): String? {
-        val isShared = WebDAVService.selectedPaths.any { shared ->
+        val isShared = FileManager.selectedPaths.any { shared ->
             realPath == shared || realPath.startsWith("$shared/")
         }
         if (!isShared) return null
@@ -659,7 +659,7 @@ class CopyFileAddressActivity : Activity() {
 
         var port = 8080
         for (root in roots) {
-            val hasShared = WebDAVService.selectedPaths.any { it.startsWith(root) }
+            val hasShared = FileManager.selectedPaths.any { it.startsWith(root) }
             if (hasShared) {
                 if (root == rootPath) return port
                 port++
