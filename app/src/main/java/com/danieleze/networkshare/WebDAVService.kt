@@ -16,13 +16,16 @@ import java.util.Collections
 import android.os.Build
 import android.app.NotificationChannel
 import android.app.PendingIntent
+import fi.iki.elonen.NanoHTTPD
 import com.danieleze.networkshare.NetworkManager.ACTION_ALLOW
 import com.danieleze.networkshare.NetworkManager.ACTION_ALLOW_ONCE
 import com.danieleze.networkshare.NetworkManager.ACTION_BLOCK
 import com.danieleze.networkshare.NetworkManager.CHANNEL_ID
 import com.danieleze.networkshare.NetworkManager.EXTRA_SSID
 
-class WebDAVService : Service(), TransferListener, NetworkManager.NetworkEventListener {
+class WebDAVService : Service(), TransferListener,
+    NetworkManager.NetworkEventListener, WebDAVServerConfig {
+
     private var currentSsid: String = ""
     private var wakeLock: android.os.PowerManager.WakeLock? = null
     private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
@@ -34,6 +37,40 @@ class WebDAVService : Service(), TransferListener, NetworkManager.NetworkEventLi
 
     // ── NetworkEventListener implementation ──────────────────
     // NetworkManager calls these when network state changes.
+
+    override fun getUsername() = username.value
+    override fun getPassword() = password.value
+    override fun isAuthEnabled() = isAuthEnabled.value
+    override fun isNetworkTrusted() = isNetworkTrusted.value
+    override fun isCancelled(fileName: String) = WebDAVService.isCancelled(fileName)
+    override fun clearCancel(fileName: String) = WebDAVService.clearCancel(fileName)
+    override fun generateToken() = WebDAVService.generateToken()
+    override fun showSafetyAlert(fileName: String) = postSafetyAlert(fileName)
+
+    override fun getCustomResponse(uri: String, uncPath: String): NanoHTTPD.Response? {
+        return when (uri) {
+            "/ic_ns.png" -> {
+                try {
+                    val stream = assets.open("ic_ns.png")
+                    NanoHTTPD.newChunkedResponse(
+                        NanoHTTPD.Response.Status.OK,
+                        "image/png",
+                        stream
+                    )
+                } catch (_: Exception) { null }
+            }
+            else -> null
+        }
+    }
+
+    override fun getDirectoryHtml(uncPath: String): String? {
+        return try {
+            assets.open("browser_instructions.html")
+                .bufferedReader()
+                .readText()
+                .replace("{{UNC_PATH}}", uncPath)
+        } catch (_: Exception) { null }
+    }
 
     override fun onNetworkTrustChanged(state: NetworkState, ssid: String) {
         isNetworkTrusted.value = state == NetworkState.TRUSTED
@@ -309,7 +346,7 @@ class WebDAVService : Service(), TransferListener, NetworkManager.NetworkEventLi
     ) {
         try {
             activeServers.add(
-                WebDAVServer(port, root, this, allowedPaths, this, boundIp)
+                WebDAVServer(port, root, this, allowedPaths, this, this, boundIp)
             )
             Log.d(tag, "Server started on port $port for ${root.absolutePath}")
         } catch (e: Exception) {
@@ -529,7 +566,7 @@ class WebDAVService : Service(), TransferListener, NetworkManager.NetworkEventLi
         manager?.createNotificationChannel(channel)
     }
 
-    fun showSafetyAlert(fileName: String) {
+    fun postSafetyAlert(fileName: String) {
         android.os.Handler(android.os.Looper.getMainLooper()).post {
             android.widget.Toast.makeText(
                 this,

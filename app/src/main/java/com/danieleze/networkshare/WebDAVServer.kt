@@ -333,6 +333,18 @@ abstract class FastHTTPD(
     }
 }
 
+interface WebDAVServerConfig {
+    fun getUsername(): String
+    fun getPassword(): String
+    fun isAuthEnabled(): Boolean
+    fun isNetworkTrusted(): Boolean
+    fun isCancelled(fileName: String): Boolean
+    fun clearCancel(fileName: String)
+    fun generateToken(): String
+    fun showSafetyAlert(fileName: String)
+    fun getCustomResponse(uri: String, uncPath: String): NanoHTTPD.Response? = null
+    fun getDirectoryHtml(uncPath: String): String? = null
+}
 // ─────────────────────────────────────────────────────────────
 //  WebDAV Server
 // ─────────────────────────────────────────────────────────────
@@ -342,6 +354,7 @@ class WebDAVServer(
     private val context: Context,
     private val allowedPaths: List<String>,
     private val listener: TransferListener,
+    private val config: WebDAVServerConfig,
     val boundIp: String = "0.0.0.0",
 ) : FastHTTPD(boundIp, port) {
 
@@ -350,8 +363,8 @@ class WebDAVServer(
 
     init {
         DigestAuthManager.setCredentials(
-            WebDAVService.username.value,
-            WebDAVService.password.value
+            config.getUsername(),
+            config.getPassword()
         )
         try {
             start(SOCKET_READ_TIMEOUT, false)
@@ -395,16 +408,10 @@ class WebDAVServer(
             )
         }
 
-        if (session.uri == "/ic_ns.png") {
-            val stream = context.assets.open("ic_ns.png")
-            return newChunkedResponse(
-                Response.Status.OK,
-                "image/png",
-                stream
-            )
-        }
+        val customResponse = config.getCustomResponse(session.uri, "")
+        if (customResponse != null) return customResponse
 
-        if (!WebDAVService.isNetworkTrusted.value) {
+        if (!config.isNetworkTrusted()) {
             return newFixedLengthResponse(
                 Response.Status.FORBIDDEN,
                 MIME_PLAINTEXT,
@@ -414,14 +421,14 @@ class WebDAVServer(
 
         // OPTIONS must always pass unauthenticated – Windows probes this first
         // before it even has credentials to send.
-        if (session.method != Method.OPTIONS && WebDAVService.isAuthEnabled.value) {
+        if (session.method != Method.OPTIONS && config.isAuthEnabled()) {
             val sessionKey = "${session.remoteIpAddress}|${session.headers["user-agent"]}"
             val authHeader = session.headers["authorization"] ?: ""
 
             // Token bypass — read-only operations only (streaming/download via URL)
             val tokenParam = session.parameters["token"]?.firstOrNull()
             val isValidToken = !tokenParam.isNullOrBlank() &&
-                    tokenParam == WebDAVService.generateToken()
+                    tokenParam == config.generateToken()
             val isReadOnly = session.method == Method.GET ||
                     session.method == Method.HEAD
 
@@ -720,8 +727,8 @@ class WebDAVServer(
                 var lastUpdateTime = 0L
 
                 while (totalRead < contentLength) {
-                    if (WebDAVService.isCancelled(target.name)) {
-                        WebDAVService.clearCancel(target.name)
+                    if (config.isCancelled(target.name)) {
+                        config.clearCancel(target.name)
                         tempFile.delete()
                         // Lock stays active — original file is protected.
                         return newFixedLengthResponse(
@@ -824,9 +831,7 @@ class WebDAVServer(
         val path = target.absolutePath
         if (target.isFile) {
             if (!PersistenceGuard.isSafeToDelete(context, path)) {
-                if (context is WebDAVService) {
-                    context.showSafetyAlert(target.name)
-                }
+                config.showSafetyAlert(target.name)
                 Log.w(tag, "Safety Lock Active: Blocking DELETE for ${target.name}")
                 return newFixedLengthResponse(
                     Response.Status.FORBIDDEN,
@@ -900,16 +905,18 @@ class WebDAVServer(
                 else uriPath.replace('/', '\\')
                 val uncFull = "$uncBase$uncSubPath"
 
-                val html = context.assets.open("browser_instructions.html")
-                    .bufferedReader()
-                    .readText()
-                    .replace("{{UNC_PATH}}", uncFull)
-
-                return newFixedLengthResponse(
-                    Response.Status.FORBIDDEN,
-                    "text/html; charset=utf-8",
-                    html
-                )
+                val customHtml = config.getDirectoryHtml(uncFull)
+                return if (customHtml != null) {
+                    newFixedLengthResponse(
+                        Response.Status.FORBIDDEN, "text/html; charset=utf-8", customHtml
+                    )
+                } else {
+                    newFixedLengthResponse(
+                        Response.Status.FORBIDDEN, "text/plain; charset=utf-8",
+                        "This is a WebDAV server. It cannot be opened in a browser.\n\n" +
+                                "To access it, use a WebDAV client and connect to:\n$uncFull"
+                    )
+                }
             }
 
             var startOffset = 0L
@@ -938,8 +945,8 @@ class WebDAVServer(
                 var lastUpdateTime = 0L
 
                 override fun read(b: ByteArray, off: Int, len: Int): Int {
-                    if (WebDAVService.isCancelled(target.name)) {
-                        WebDAVService.clearCancel(target.name)
+                    if (config.isCancelled(target.name)) {
+                        config.clearCancel(target.name)
                         throw IOException("Transfer cancelled by user")
                     }
                     val maxToRead = min(len.toLong(), dataToDeliver - totalBytesRead).toInt()
