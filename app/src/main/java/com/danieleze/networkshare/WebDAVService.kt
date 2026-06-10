@@ -224,9 +224,11 @@ class WebDAVService : Service(), TransferListener, NetworkManager.NetworkEventLi
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+
     // ── Server management ─────────────────────────────────────
 
     private var isStartingServers = false
+    private var nextPort = 8080
 
     private fun startWebDAVServers() {
         if (isStartingServers) {
@@ -235,74 +237,90 @@ class WebDAVService : Service(), TransferListener, NetworkManager.NetworkEventLi
         }
         isStartingServers = true
 
-        activeServers.forEach { it.stopServer() }
-        activeServers.clear()
-
+        stopActiveServers()
         NetworkManager.load(this)
         ensureChannel(getSystemService(NotificationManager::class.java))
 
-        val isOnHotspot = try {
-            java.net.NetworkInterface.getNetworkInterfaces().toList().any { intf ->
-                intf.isUp && !intf.isLoopback && (
-                        intf.name.contains("ap") || intf.name.contains("softap")
-                        )
-            }
-        } catch (_: Exception) { false }
+        val boundIp = NetworkManager.getLocalIpAddress() ?: "0.0.0.0"
+        val roots = getStorageRoots()
 
-        if (!isOnHotspot) {
+        if (!isOnHotspot()) {
             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                 NetworkManager.updateNetworkTrust(
-                    context                   = this,
-                    currentSsid               = currentSsid,
-                    wifiJustEnabled           = wifiJustEnabled,
+                    context = this,
+                    currentSsid = currentSsid,
+                    wifiJustEnabled = wifiJustEnabled,
                     onWifiJustEnabledConsumed = { wifiJustEnabled = false }
                 )
             }, 1500)
         }
 
-        var nextPort = 8080
-        val maxPort = 8089
-
-        val externalDirs = getExternalFilesDirs(null)
-        val roots = externalDirs.filterNotNull().map { dir ->
-            if (dir.absolutePath.contains("/Android/")) {
-                dir.absolutePath.split("/Android/")[0]
-            } else {
-                dir.absolutePath
-            }
-        }.distinct().map { File(it) }
-
-        val boundIp = NetworkManager.getLocalIpAddress() ?: "0.0.0.0"
-
+        nextPort = 8080
         roots.forEach { root ->
-            val allowedInThisRoot = FileManager.selectedPaths.filter { it.startsWith(root.absolutePath) }
-
-            if (allowedInThisRoot.isNotEmpty() && nextPort <= maxPort) {
-                while (isPortBusy(nextPort) && nextPort <= maxPort) {
-                    nextPort++
-                }
-
-                if (nextPort <= maxPort) {
-                    try {
-                        activeServers.add(WebDAVServer(nextPort, root, this, allowedInThisRoot, this, boundIp))
-                        nextPort++
-                    } catch (e: Exception) {
-                        Log.e(tag, "Failed to start server for ${root.absolutePath}: ${e.message}")
-                    }
-                }
-            }
+            val allowedPaths = FileManager.selectedPaths
+                .filter { it.startsWith(root.absolutePath) }
+            if (allowedPaths.isEmpty()) return@forEach
+            val port = findAvailablePort()
+            launchServer(root, allowedPaths, boundIp, port)
         }
 
         isStartingServers = false
         broadcastCurrentAddresses()
     }
 
+    private fun stopActiveServers() {
+        activeServers.forEach { it.stopServer() }
+        activeServers.clear()
+    }
+
+    private fun getStorageRoots(): List<File> {
+        return getExternalFilesDirs(null)
+            .filterNotNull()
+            .map { dir ->
+                if (dir.absolutePath.contains("/Android/"))
+                    dir.absolutePath.split("/Android/")[0]
+                else dir.absolutePath
+            }
+            .distinct()
+            .map { File(it) }
+    }
+
+    private fun isOnHotspot(): Boolean {
+        return try {
+            java.net.NetworkInterface.getNetworkInterfaces().toList().any { intf ->
+                intf.isUp && !intf.isLoopback &&
+                        (intf.name.contains("ap") || intf.name.contains("softap"))
+            }
+        } catch (_: Exception) { false }
+    }
+
+    private fun findAvailablePort(): Int {
+        while (isPortBusy(nextPort)) {
+            nextPort++
+        }
+        return nextPort++
+    }
+
+    private fun launchServer(
+        root: File,
+        allowedPaths: List<String>,
+        boundIp: String,
+        port: Int
+    ) {
+        try {
+            activeServers.add(
+                WebDAVServer(port, root, this, allowedPaths, this, boundIp)
+            )
+            Log.d(tag, "Server started on port $port for ${root.absolutePath}")
+        } catch (e: Exception) {
+            Log.e(tag, "Failed to start server for ${root.absolutePath}: ${e.message}")
+        }
+    }
+
     private fun isPortBusy(port: Int): Boolean {
         return try {
             java.net.ServerSocket(port).use { false }
-        } catch (_: Exception) {
-            true
-        }
+        } catch (_: Exception) { true }
     }
 
     private fun broadcastCurrentAddresses() {
