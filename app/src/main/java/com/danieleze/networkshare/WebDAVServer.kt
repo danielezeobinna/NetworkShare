@@ -349,7 +349,7 @@ interface WebDAVServerConfig {
 //  WebDAV Server
 // ─────────────────────────────────────────────────────────────
 class WebDAVServer(
-    val port: Int,
+    val port: Int = 8080,
     val rootDirectory: File,
     private val context: Context,
     private val allowedPaths: List<String>,
