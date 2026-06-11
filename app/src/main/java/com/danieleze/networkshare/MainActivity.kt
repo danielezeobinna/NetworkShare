@@ -1420,7 +1420,8 @@ fun StorageRow(
                 )
                 .clickable {
                     if (!isInherited) {
-                        FileManager.toggleSelection(context, fullPath)
+                        FileManager.toggleSelection(fullPath)
+                        WebDAVService.savePaths(context)
                         if (WebDAVService.isRunning) {
                             context.startService(
                                 Intent(

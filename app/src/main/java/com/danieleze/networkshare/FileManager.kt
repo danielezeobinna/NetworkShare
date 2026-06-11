@@ -1,6 +1,5 @@
 package com.danieleze.networkshare
 
-import android.content.Context
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import java.io.File
@@ -18,12 +17,11 @@ object FileManager {
     var isScanning    = mutableStateOf(false)
     var tempPriorityPath: String? = null
 
-    fun toggleSelection(context: Context, path: String) {
+    fun toggleSelection(path: String) {
         val parentPath = selectedPaths.firstOrNull { path.startsWith("$it/") && path != it }
         if (parentPath != null) return
         if (selectedPaths.contains(path)) selectedPaths.remove(path)
         else selectedPaths.add(path)
-        WebDAVService.savePaths(context)
     }
 
     fun requestFolderScan(directory: File?) {
