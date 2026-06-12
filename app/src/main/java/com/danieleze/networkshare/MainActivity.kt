@@ -1849,7 +1849,7 @@ fun LocationOffDialog(show: Boolean, appTheme: AppTheme, onDismiss: () -> Unit) 
                     )
                     TextButton(onClick = {
                         onDismiss()
-                        (context as? AppControl)?.pendingLocationCheck = true
+                        (context as? MainActivity)?.pendingLocationCheck = true
                         context.startService(Intent(context, AppControlService::class.java))
                         context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS).apply {
                             addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY)
@@ -2103,7 +2103,7 @@ fun NotificationPermissionDialog(show: Boolean, appTheme: AppTheme, onDismiss: (
                     )
                     TextButton(onClick = {
                         onDismiss()
-                        (context as? AppControl)?.pendingNotificationCheck = true
+                        (context as? MainActivity)?.pendingNotificationCheck = true
                         context.startService(Intent(context, AppControlService::class.java))
                         context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
                             putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)

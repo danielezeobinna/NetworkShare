@@ -34,21 +34,6 @@ import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import java.io.File
 
-/**
- * AppControl — runs for the entire lifetime the app is open.
- *
- * Responsibilities:
- *  - Android lifecycle (onCreate … onPause)
- *  - Biometric / PIN authentication
- *  - Storage & notification permissions
- *  - Foreground-service start / stop
- *  - BroadcastReceiver for service events
- *  - Interstitial ad loading and showing
- *  - Incoming-share handling and file saving
- *  - Preference persistence (theme, addresses)
- *
- * MainActivity extends this class and only owns the UI layer.
- */
 abstract class AppControl : androidx.fragment.app.FragmentActivity() {
 
     companion object {
@@ -63,13 +48,10 @@ abstract class AppControl : androidx.fragment.app.FragmentActivity() {
     var isDiscoveryOn by mutableStateOf(false); protected set
     var isPending by mutableStateOf(false); protected set
     var appTheme by mutableStateOf(AppTheme.SYSTEM); protected set
-
-    // Dialog triggers (UI reads these; AppControl writes them)
     var showLocationOffDialog by mutableStateOf(false)
     var showNetworkDialog by mutableStateOf(false)
     var showUnknownNetworkDialog by mutableStateOf(false)
     var showNotificationDialog by mutableStateOf(false)
-
     var pendingNotificationCheck = false
     var pendingLocationCheck = false
     var pendingStorageCheck = false
