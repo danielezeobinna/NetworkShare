@@ -130,6 +130,7 @@ abstract class AppControl : androidx.fragment.app.FragmentActivity() {
     // ── Lifecycle ─────────────────────────────────────────────────────────────
     @SuppressLint("ObsoleteSdkInt")
     override fun onCreate(savedInstanceState: Bundle?) {
+        instance = null
         super.onCreate(savedInstanceState)
         instance = this
         Log.d("AppControl", "STARTED — app opened")
@@ -139,14 +140,14 @@ abstract class AppControl : androidx.fragment.app.FragmentActivity() {
 
         isPending = false
         isDiscoveryOn = isServiceRunning()
-        WebDAVService.loadPaths(this)
+        WebDAVService.loadPaths(this.applicationContext)
 
         if (savedInstanceState == null) {
             handleIncomingShare(intent)
             loadAddresses()
         }
 
-        MobileAds.initialize(this) {}
+        MobileAds.initialize(this.applicationContext) {}
         loadInterstitialAd()
 
         val savedTheme = getPreferences(MODE_PRIVATE).getString("app_theme", "SYSTEM")
@@ -166,11 +167,11 @@ abstract class AppControl : androidx.fragment.app.FragmentActivity() {
     }
 
     override fun onStop() {
-        super.onStop()
         try {
             unregisterReceiver(receiver)
         } catch (_: Exception) {
         }
+        super.onStop()
     }
 
     override fun onResume() {
@@ -242,10 +243,12 @@ abstract class AppControl : androidx.fragment.app.FragmentActivity() {
     }
 
     override fun onDestroy() {
-        super.onDestroy()
-        instance = null
+        if (instance == this) {
+            instance = null
+        }
         Log.d("AppControl", "STOPPED — app closed")
         stopService(Intent(this, AppControlService::class.java))
+        super.onDestroy()
     }
 
     // ── Authentication ────────────────────────────────────────────────────────
@@ -321,6 +324,7 @@ abstract class AppControl : androidx.fragment.app.FragmentActivity() {
                 }
                 pendingStorageCheck = true
                 startActivity(intent)
+                startService(Intent(this, AppControlService::class.java))
             } else {
                 isUnlocked = true
             }
@@ -683,65 +687,79 @@ class AppControlService : Service() {
     }
 
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var isHeartbeatActive = false
 
     private val heartbeat = object : Runnable {
         override fun run() {
-            val controller = AppControl.instance
+            val control = AppControl.instance
 
-            if (controller == null) {
+            if (control == null) {
                 Log.d("AppControlService", "AppControl gone — stopping service")
                 stopSelf()
                 return
             }
 
-            checkPendingPermissions(controller)
+            checkPendingPermissions(control)
 
-            val hasPendingCheck = controller.pendingNotificationCheck ||
-                    controller.pendingLocationCheck ||
-                    controller.pendingStorageCheck
+            val stillHasPendingCheck = control.pendingNotificationCheck ||
+                    control.pendingLocationCheck ||
+                    control.pendingStorageCheck
 
-            handler.postDelayed(this, if (hasPendingCheck) 1_000L else 30_000L)
+            if (stillHasPendingCheck) {
+                handler.postDelayed(this, 1000L)
+            } else {
+                Log.d("AppControlService", "All permissions cleared. Stopping heartbeat loop.")
+                isHeartbeatActive = false
+            }
         }
     }
 
-    private fun checkPendingPermissions(controller: AppControl) {
+    private fun startHeartbeatIfNeeded() {
+        if (!isHeartbeatActive) {
+            isHeartbeatActive = true
+            Log.d("AppControlService", "Starting 1-second permission heartbeat loop")
+            handler.post(heartbeat) // Starts immediately
+        }
+    }
 
-        // Notification permission
-        if (controller.pendingNotificationCheck) {
+    private fun checkPendingPermissions(control: AppControl) {
+
+        // Notification permission check
+        if (control.pendingNotificationCheck) {
             val notifManager = getSystemService(android.app.NotificationManager::class.java)
             if (notifManager.areNotificationsEnabled()) {
                 Log.d("AppControlService", "Notification permission granted — returning to app")
-                controller.pendingNotificationCheck = false
-                controller.showNotificationDialog = false
+                control.pendingNotificationCheck = false
+                control.showNotificationDialog = false
                 bringAppForward()
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
-                    controller.handleToggle(true)
+                    control.handleToggle(true)
                 }
             }
         }
 
-        // Location permission
-        if (controller.pendingLocationCheck) {
+        // Location permission check
+        if (control.pendingLocationCheck) {
             val lm = getSystemService(LOCATION_SERVICE) as android.location.LocationManager
             val isOn = lm.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER) ||
                     lm.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER)
             if (isOn) {
                 Log.d("AppControlService", "Location turned on — returning to app")
-                controller.pendingLocationCheck = false
-                controller.showLocationOffDialog = false
+                control.pendingLocationCheck = false
+                control.showLocationOffDialog = false
                 bringAppForward()
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
-                    controller.checkLocationForUntrustedNetwork()
+                    control.checkLocationForUntrustedNetwork()
                 }
             }
         }
 
-        // All files access permission
-        if (controller.pendingStorageCheck) {
+        // All files access permission check
+        if (control.pendingStorageCheck) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 if (Environment.isExternalStorageManager()) {
                     Log.d("AppControlService", "All files access granted — returning to app")
-                    controller.pendingStorageCheck = false
+                    control.pendingStorageCheck = false
                     bringAppForward()
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
                         AppControl.isUnlocked = true
@@ -761,11 +779,11 @@ class AppControlService : Service() {
     override fun onCreate() {
         super.onCreate()
         isRunning = true
-        Log.d("AppControlService", "STARTED")
-        handler.postDelayed(heartbeat, 30_000L)
+        Log.d("AppControlService", "Service Created")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        startHeartbeatIfNeeded()
         return START_STICKY
     }
 
@@ -773,7 +791,8 @@ class AppControlService : Service() {
         super.onDestroy()
         isRunning = false
         handler.removeCallbacks(heartbeat)
-        Log.d("AppControlService", "STOPPED")
+        isHeartbeatActive = false
+        Log.d("AppControlService", "Service Destroyed")
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
