@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.IBinder
 import android.util.Log
+import android.os.storage.StorageManager
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.graphics.toColorInt
 import androidx.core.app.NotificationCompat
@@ -47,9 +48,14 @@ class WebDAVService : Service(), TransferListener,
     override fun generateToken() = WebDAVService.generateToken()
     override fun showSafetyAlert(fileName: String) = postSafetyAlert(fileName)
 
+    override fun sharedItems(uri: String): Any? {
+        return FileManager.sharedItems(uri)
+    }
+
     override fun getCustomResponse(uri: String, uncPath: String): NanoHTTPD.Response? {
-        return when (uri) {
-            "/ic_ns.png" -> {
+        val fileName = uri.trimEnd('/').substringAfterLast('/')
+        return when (fileName) {
+            "ic_ns.png" -> {
                 try {
                     val stream = assets.open("ic_ns.png")
                     NanoHTTPD.newChunkedResponse(
@@ -268,18 +274,11 @@ class WebDAVService : Service(), TransferListener,
     private var nextPort = 8080
 
     private fun startWebDAVServers() {
-        if (isStartingServers) {
-            Log.d(tag, "startWebDAVServers() already in progress — skipping duplicate call")
-            return
-        }
+        if (isStartingServers) return
         isStartingServers = true
-
         stopActiveServers()
         NetworkManager.load(this)
         ensureChannel(getSystemService(NotificationManager::class.java))
-
-        val boundIp = NetworkManager.getLocalIpAddress() ?: "0.0.0.0"
-        val roots = getStorageRoots()
 
         if (!isOnHotspot()) {
             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
@@ -292,13 +291,72 @@ class WebDAVService : Service(), TransferListener,
             }, 1500)
         }
 
+        val boundIp = NetworkManager.getLocalIpAddress() ?: "0.0.0.0"
+
+        FileManager.storageRoots.clear()
+        val storageManager = getSystemService(STORAGE_SERVICE) as StorageManager
+        val externalDirs = getExternalFilesDirs(null).filterNotNull()
+        val usedLabels = mutableSetOf<String>()
+
+        externalDirs.forEach { dir ->
+            val volume = storageManager.getStorageVolume(dir) ?: return@forEach
+
+            val rootPath = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                volume.directory?.absolutePath ?: dir.absolutePath.split("/Android/")[0]
+            } else {
+                dir.absolutePath.split("/Android/")[0]
+            }
+
+            val description = volume.getDescription(this) ?: "External Drive"
+
+            val label = when {
+                !volume.isRemovable || volume.isPrimary -> "Internal Storage"
+                else -> {
+                    val volumeName = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        volume.mediaStoreVolumeName?.lowercase() ?: ""
+                    } else ""
+
+                    val containsUsb = volumeName.contains("usb") ||
+                            description.lowercase().contains("usb") ||
+                            rootPath.lowercase().contains("usb")
+
+                    val containsSd = volumeName.contains("sd") ||
+                            description.lowercase().contains("sd") ||
+                            rootPath.lowercase().contains("sd")
+
+                    val isUsb = containsUsb && !containsSd
+
+                    val kind = if (isUsb) "USB OTG" else "SD Card"
+
+                    if (description.contains(kind, ignoreCase = true) ||
+                        (isUsb && description.contains("usb", ignoreCase = true))) {
+                        description
+                    } else {
+                        "$kind ($description)"
+                    }
+                }
+            }
+
+            // Disambiguate if two volumes resolve to the same label
+            var finalLabel = label
+            var suffix = 2
+            while (!usedLabels.add(finalLabel)) {
+                finalLabel = "$label #$suffix"
+                suffix++
+            }
+
+            FileManager.storageRoots[finalLabel] = rootPath
+        }
+
         nextPort = 8080
-        roots.forEach { root ->
-            val allowedPaths = FileManager.selectedPaths
-                .filter { it.startsWith(root.absolutePath) }
-            if (allowedPaths.isEmpty()) return@forEach
-            val port = findAvailablePort()
-            launchServer(root, allowedPaths, boundIp, port)
+        val port = findAvailablePort()
+        try {
+            activeServers.add(
+                WebDAVServer(port, this, this, this, boundIp)
+            )
+            Log.d(tag, "Unified server started on port $port")
+        } catch (e: Exception) {
+            Log.e(tag, "Failed to start server: ${e.message}")
         }
 
         isStartingServers = false
@@ -308,18 +366,6 @@ class WebDAVService : Service(), TransferListener,
     private fun stopActiveServers() {
         activeServers.forEach { it.stopServer() }
         activeServers.clear()
-    }
-
-    private fun getStorageRoots(): List<File> {
-        return getExternalFilesDirs(null)
-            .filterNotNull()
-            .map { dir ->
-                if (dir.absolutePath.contains("/Android/"))
-                    dir.absolutePath.split("/Android/")[0]
-                else dir.absolutePath
-            }
-            .distinct()
-            .map { File(it) }
     }
 
     private fun isOnHotspot(): Boolean {
@@ -338,21 +384,7 @@ class WebDAVService : Service(), TransferListener,
         return nextPort++
     }
 
-    private fun launchServer(
-        root: File,
-        allowedPaths: List<String>,
-        boundIp: String,
-        port: Int
-    ) {
-        try {
-            activeServers.add(
-                WebDAVServer(port, root, this, allowedPaths, this, this, boundIp)
-            )
-            Log.d(tag, "Server started on port $port for ${root.absolutePath}")
-        } catch (e: Exception) {
-            Log.e(tag, "Failed to start server for ${root.absolutePath}: ${e.message}")
-        }
-    }
+
 
     private fun isPortBusy(port: Int): Boolean {
         return try {
@@ -361,6 +393,10 @@ class WebDAVService : Service(), TransferListener,
     }
 
     private fun broadcastCurrentAddresses() {
+        val server = activeServers.firstOrNull()
+        val boundIp = server?.boundIp ?: "0.0.0.0"
+        val port = server?.port ?: 8080
+        val isValidNetwork = boundIp != "0.0.0.0"
         val statusSummary = StringBuilder()
 
         data class AddressItem(
@@ -373,26 +409,22 @@ class WebDAVService : Service(), TransferListener,
 
         val addressList = mutableListOf<AddressItem>()
 
-        activeServers.forEach { server ->
-            val rootPath = server.rootDirectory.absolutePath
-            val storageLabel = when {
-                rootPath.contains("emulated/0") -> "Internal Storage"
-                rootPath.lowercase().contains("usb") -> "USB OTG (${server.rootDirectory.name})"
-                else -> "SD Card (${server.rootDirectory.name})"
-            }
-
+        FileManager.storageRoots.forEach { (label, rootPath) ->
             FileManager.selectedPaths.filter { it.startsWith(rootPath) }.forEach { path ->
                 val folder = File(path)
                 val isRoot = path == rootPath
                 val relativePath = path.removePrefix(rootPath).trimStart('/')
-                val isTempVip = path == FileManager.tempPriorityPath
+                val url = if (relativePath.isEmpty())
+                    "http://$boundIp:$port/$label"
+                else
+                    "http://$boundIp:$port/$label/$relativePath"
 
                 addressList.add(AddressItem(
-                    label = storageLabel,
+                    label = label,
                     folderName = folder.name,
-                    url = "http://${server.boundIp}:${server.port}/$relativePath",
+                    url = url,
                     isStorage = isRoot,
-                    isTempVip = isTempVip
+                    isTempVip = path == FileManager.tempPriorityPath
                 ))
             }
         }
@@ -407,9 +439,6 @@ class WebDAVService : Service(), TransferListener,
             val displayName = if (item.isStorage) item.label else item.folderName
             statusSummary.append("$displayName:\n${item.url}\n\n")
         }
-
-        val boundIp = activeServers.firstOrNull()?.boundIp ?: "0.0.0.0"
-        val isValidNetwork = boundIp != "0.0.0.0"
 
         val intent = Intent("com.danieleze.networkshare.ADDRESSES_UPDATED")
         intent.putExtra("address_list", statusSummary.toString().trim().ifEmpty { "No folders selected." })

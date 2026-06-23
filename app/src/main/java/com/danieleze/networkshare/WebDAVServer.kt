@@ -10,7 +10,6 @@ import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.min
-import kotlin.text.Charsets
 import androidx.core.content.edit
 import fi.iki.elonen.NanoHTTPD
 import java.io.BufferedInputStream
@@ -342,6 +341,7 @@ interface WebDAVServerConfig {
     fun clearCancel(fileName: String)
     fun generateToken(): String
     fun showSafetyAlert(fileName: String)
+    fun sharedItems(uri: String): Any?
     fun getCustomResponse(uri: String, uncPath: String): NanoHTTPD.Response? = null
     fun getDirectoryHtml(uncPath: String): String? = null
 }
@@ -350,9 +350,7 @@ interface WebDAVServerConfig {
 // ─────────────────────────────────────────────────────────────
 class WebDAVServer(
     val port: Int = 8080,
-    val rootDirectory: File,
     private val context: Context,
-    private val allowedPaths: List<String>,
     private val listener: TransferListener,
     private val config: WebDAVServerConfig,
     val boundIp: String = "0.0.0.0",
@@ -368,7 +366,7 @@ class WebDAVServer(
         )
         try {
             start(SOCKET_READ_TIMEOUT, false)
-            Log.d(tag, "Server started at ${rootDirectory.absolutePath}")
+            //Log.d(tag, "Server started at ${rootDirectory.absolutePath}")
         } catch (e: IOException) {
             Log.e(tag, "Could not start server on port $port", e)
         }
@@ -460,214 +458,51 @@ class WebDAVServer(
 
         val uri = session.uri
         val method = session.method
-        val targetFile = File(rootDirectory, uri.trimStart('/'))
-        val targetPath = targetFile.absolutePath
-        val fileName = targetFile.name
-        val isDesktopIni = fileName.equals("desktop.ini", ignoreCase = true)
-        val isRoot = uri == "/" || uri.isEmpty()
 
-        val isAllowed = isRoot || isDesktopIni || allowedPaths.any { sharedPath ->
-            targetPath == sharedPath || targetPath.startsWith("$sharedPath/")
-        }
+        val result = config.sharedItems(uri)
 
-        if (!isAllowed) {
+        if (result is Int) {
             return newFixedLengthResponse(
-                Response.Status.FORBIDDEN,
-                MIME_PLAINTEXT,
-                "Access Denied"
+                Response.Status.lookup(result), MIME_PLAINTEXT, "Error $result"
+            )
+        }
+        if (result == null) {
+            return newFixedLengthResponse(
+                Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not Found"
             )
         }
 
+        val targetFile = result as? File
+
         return when (method) {
             Method.OPTIONS -> serveOptions()
-            Method.PROPFIND -> {
-                if (isDesktopIni && !targetFile.exists()) {
-                    serveVirtualDesktopIniPropfind(uri)
-                } else if (targetFile.exists()) {
-                    servePropfind(targetFile, session)
-                } else {
-                    serveNotFound()
-                }
+            Method.PROPFIND -> when {
+                targetFile != null && targetFile.exists() -> servePropfind(targetFile, session)
+                else -> serveNotFound()
             }
-
-            Method.GET -> {
-                if (isDesktopIni) {
-                    if (targetFile.exists()) serveFile(targetFile, session)
-                    else serveVirtualDesktopIni(uri)
-                } else {
-                    if (targetFile.exists()) serveFile(targetFile, session) else serveNotFound()
-                }
+            Method.GET -> when {
+                targetFile != null -> serveFile(targetFile, session)
+                else -> serveNotFound()
             }
-
-            Method.DELETE -> handleDelete(targetFile)
-            Method.PUT -> handlePut(session, targetFile)
-            Method.MKCOL -> handleMkcol(targetFile)
-            Method.PROPPATCH -> handleProppatch(session, targetFile)
-            Method.MOVE -> handleMove(session, targetFile)
+            Method.DELETE -> if (targetFile != null) handleDelete(targetFile) else serveNotFound()
+            Method.PUT -> if (targetFile != null) handlePut(session, targetFile) else serveNotFound()
+            Method.MKCOL -> if (targetFile != null) handleMkcol(targetFile) else serveNotFound()
+            Method.PROPPATCH -> if (targetFile != null) handleProppatch(session, targetFile) else serveNotFound()
+            Method.MOVE -> if (targetFile != null) handleMove(session, targetFile) else serveNotFound()
+            Method.COPY -> if (targetFile != null) handleCopy(session, targetFile) else serveNotFound()
             Method.LOCK -> serveLock(uri)
             Method.UNLOCK -> newFixedLengthResponse(Response.Status.NO_CONTENT, MIME_PLAINTEXT, "")
-            Method.HEAD -> if (targetFile.exists()) {
+            Method.HEAD -> if (targetFile != null && targetFile.exists()) {
                 val res = newFixedLengthResponse(Response.Status.OK, "application/octet-stream", "")
                 res.addHeader("Content-Length", targetFile.length().toString())
                 res.addHeader("Accept-Ranges", "bytes")
                 res.addHeader("ETag", "\"${targetFile.lastModified()}-${targetFile.length()}\"")
                 res
             } else serveNotFound()
-
             else -> newFixedLengthResponse(
-                Response.Status.METHOD_NOT_ALLOWED,
-                MIME_PLAINTEXT,
-                "Not Supported"
+                Response.Status.METHOD_NOT_ALLOWED, MIME_PLAINTEXT, "Not Supported"
             )
         }
-    }
-
-    // ── Virtual desktop.ini ──────────────────────────────────
-
-    private fun serveVirtualDesktopIni(uri: String): Response {
-        val folderPath = uri.removeSuffix("/desktop.ini").removeSuffix("/")
-        val cleanPath = folderPath.ifEmpty { "/" }
-
-        val content = when {
-            cleanPath == "/" -> """
-                [ViewState]
-                Mode=
-                Vid=
-                FolderType=Generic
-                [.ShellClassInfo]
-                IconResource=C:\Windows\System32\SHELL32.dll,9
-            """.trimIndent()
-
-            cleanPath.equals("/Android", ignoreCase = true) -> """
-                [ViewState]
-                Mode=
-                Vid=
-                FolderType=Generic
-                [.ShellClassInfo]
-                InfoTip=Contains system files and folders
-                IconResource=C:\Windows\System32\SHELL32.dll,314
-            """.trimIndent()
-
-            cleanPath.equals("/DCIM", ignoreCase = true) -> """
-                [ViewState]
-                Mode=
-                Vid=
-                FolderType=Pictures
-                [.ShellClassInfo]
-                InfoTip=Contains photos and footage taken by the camera
-                IconResource=C:\Windows\System32\SHELL32.dll,117
-            """.trimIndent()
-
-            cleanPath.equals("/Documents", ignoreCase = true) -> """
-                [ViewState]
-                Mode=
-                Vid=
-                FolderType=Documents
-                [.ShellClassInfo]
-                IconResource=C:\Windows\System32\SHELL32.dll,126
-            """.trimIndent()
-
-            cleanPath.equals("/Download", ignoreCase = true) -> """
-                [ViewState]
-                Mode=
-                Vid=
-                FolderType=Generic
-                [.ShellClassInfo]
-                InfoTip=Contains downloaded files and folders
-                IconResource=%SystemRoot%\system32\imageres.dll,-184
-            """.trimIndent()
-
-            cleanPath.equals("/Movies", ignoreCase = true) -> """
-                [ViewState]
-                Mode=
-                Vid=
-                FolderType=Videos
-                [.ShellClassInfo]
-                InfoTip=@%SystemRoot%\system32\shell32.dll,-12690
-                IconResource=C:\Windows\System32\SHELL32.dll,129
-            """.trimIndent()
-
-            cleanPath.equals("/Music", ignoreCase = true) -> """
-                [ViewState]
-                Mode=
-                Vid=
-                FolderType=Music
-                [.ShellClassInfo]
-                InfoTip=@%SystemRoot%\system32\shell32.dll,-12689
-                IconResource=C:\Windows\System32\SHELL32.dll,128
-            """.trimIndent()
-
-            cleanPath.equals("/Pictures", ignoreCase = true) -> """
-                [ViewState]
-                Mode=
-                Vid=
-                FolderType=Pictures
-                [.ShellClassInfo]
-                InfoTip=@%SystemRoot%\system32\shell32.dll,-12688
-                IconResource=C:\Windows\System32\SHELL32.dll,127
-            """.trimIndent()
-
-            cleanPath.equals("/NetworkShare", ignoreCase = true) -> """
-                [ViewState]
-                Mode=
-                Vid=
-                FolderType=Generic
-                [.ShellClassInfo]
-                InfoTip=Contains files and folders that are shared to your network
-                IconResource=%SystemRoot%\System32\imageres.dll,42
-            """.trimIndent()
-
-            else -> return newFixedLengthResponse(
-                Response.Status.lookup(410),
-                MIME_PLAINTEXT,
-                "Not Available"
-            )
-
-        }.replace("\n", "\r\n")
-
-        val encodedBytes = content.toByteArray(Charsets.UTF_16LE)
-        val finalBody = ByteArray(encodedBytes.size + 2)
-        finalBody[0] = 0xFF.toByte()
-        finalBody[1] = 0xFE.toByte()
-        System.arraycopy(encodedBytes, 0, finalBody, 2, encodedBytes.size)
-
-        val res = newFixedLengthResponse(
-            Response.Status.OK,
-            "application/octet-stream",
-            finalBody.inputStream(),
-            finalBody.size.toLong()
-        )
-        res.addHeader("Content-Type", "text/plain; charset=utf-16le")
-        return res
-    }
-
-    private fun getVirtualDesktopIniXml(uri: String): String {
-        val now = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss z", Locale.US)
-            .apply { timeZone = TimeZone.getTimeZone("GMT") }.format(Date())
-        return """
-            <D:response xmlns:Z="urn:schemas-microsoft-com:">
-                <D:href>$uri</D:href>
-                <D:propstat>
-                    <D:prop>
-                        <D:displayname>desktop.ini</D:displayname>
-                        <D:getcontentlength>200</D:getcontentlength>
-                        <D:resourcetype/>
-                        <D:getlastmodified>$now</D:getlastmodified>
-                        <Z:Win32FileAttributes>0x00000006</Z:Win32FileAttributes>
-                    </D:prop>
-                    <D:status>HTTP/1.1 200 OK</D:status>
-                </D:propstat>
-            </D:response>
-        """.trimIndent()
-    }
-
-    private fun serveVirtualDesktopIniPropfind(uri: String): Response {
-        val xmlBody = getVirtualDesktopIniXml(uri)
-        return newFixedLengthResponse(
-            Response.Status.lookup(207),
-            "application/xml; charset=utf-8",
-            xmlBody
-        )
     }
 
     // ── WebDAV method handlers ───────────────────────────────
@@ -811,7 +646,18 @@ class WebDAVServer(
         return try {
             val decodedPath =
                 java.net.URLDecoder.decode(java.net.URL(destinationHeader).path, "UTF-8")
-            val destFile = File(rootDirectory, decodedPath.trimStart('/'))
+
+            val destFile: File = when (val result = config.sharedItems(decodedPath)) {
+                is File -> result
+                is Int -> return newFixedLengthResponse(
+                    Response.Status.lookup(result), MIME_PLAINTEXT, "Error $result"
+                )
+
+                else -> return newFixedLengthResponse(
+                    Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not Found"
+                )
+            }
+
             destFile.parentFile?.mkdirs()
             if (target.renameTo(destFile)) {
                 newFixedLengthResponse(Response.Status.CREATED, MIME_PLAINTEXT, "Moved")
@@ -826,6 +672,32 @@ class WebDAVServer(
             newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, e.message)
         }
     }
+
+    private fun handleCopy(session: IHTTPSession, target: File): Response {
+        val destinationHeader = session.headers["destination"] ?: return serveNotFound()
+        return try {
+            val decodedPath = java.net.URLDecoder.decode(java.net.URL(destinationHeader).path, "UTF-8")
+
+            val destFile: File = when (val result = config.sharedItems(decodedPath)) {
+                is File -> result
+                is Int -> return newFixedLengthResponse(Response.Status.lookup(result), MIME_PLAINTEXT, "Error $result")
+                else -> {
+                    File(target.parent, decodedPath.substringAfterLast("/"))
+                }
+            }
+
+            target.inputStream().use { input ->
+                destFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+
+            newFixedLengthResponse(Response.Status.CREATED, MIME_PLAINTEXT, "Copied")
+        } catch (e: Exception) {
+            newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, e.message)
+        }
+    }
+
 
     private fun handleDelete(target: File): Response {
         val path = target.absolutePath
@@ -879,7 +751,7 @@ class WebDAVServer(
         val res = newFixedLengthResponse(Response.Status.OK, MIME_PLAINTEXT, "")
         res.addHeader(
             "Allow",
-            "GET, POST, OPTIONS, PROPFIND, PUT, MKCOL, DELETE, COPY, MOVE, LOCK, UNLOCK"
+            "GET, HEAD, POST, OPTIONS, PROPFIND, PUT, MKCOL, DELETE, COPY, MOVE, LOCK, UNLOCK"
         )
         res.addHeader("DAV", "1, 2")
         res.addHeader("MS-Author-Via", "DAV")
@@ -1028,12 +900,8 @@ class WebDAVServer(
             target.listFiles()?.filter { child ->
                 !child.name.startsWith(".~") // hide in-progress temp files
             }?.forEach { child ->
-                val childPath = child.absolutePath
-                val isVisible = allowedPaths.any { allowed ->
-                    childPath == allowed ||
-                            allowed.startsWith("$childPath/") ||
-                            childPath.startsWith("$allowed/")
-                }
+                val childResult = config.sharedItems("${session.uri.trimEnd('/')}/${child.name}")
+                val isVisible = childResult is File
                 if (isVisible) {
                     val baseUri = session.uri.removeSuffix("/")
                     val childUri = "$baseUri/${child.name}"
@@ -1065,26 +933,14 @@ class WebDAVServer(
         val safeUri = uri.split("/")
             .joinToString("/") { java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
 
-        val androidDir = File(rootDirectory, "Android").absolutePath
-        val currentPath = file.absolutePath
-        val isWithinAndroid = currentPath == androidDir || currentPath.startsWith("$androidDir/")
-        val isRootChild = file.parentFile?.absolutePath == rootDirectory.absolutePath
-        val iconFolders =
-            listOf("DCIM", "Documents", "Download", "Movies", "Music", "NetworkShare", "Pictures")
-        val hasDesktopIni = File(file.absolutePath, "desktop.ini").exists()
+        val desktopIniUri = uri.trimEnd('/') + "/desktop.ini"
+        val hasDesktopIni = isDir && config.sharedItems(desktopIniUri) is File
 
         val attributes = when {
-            isWithinAndroid -> "0x00000004"
-            isDir && isRootChild && iconFolders.any {
-                it.equals(
-                    file.name,
-                    ignoreCase = true
-                )
-            } -> "0x00000001"
-
-            isDir && hasDesktopIni -> "0x00000001"
+            config.sharedItems("$uri::attrs") != null -> config.sharedItems("$uri::attrs")
+            hasDesktopIni -> "0x00000001"
             isDir -> "0x00000010"
-            else -> "0x00000020"
+            else -> "0x00000000"
         }
 
         return """

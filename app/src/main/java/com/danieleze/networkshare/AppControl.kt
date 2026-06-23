@@ -131,6 +131,7 @@ abstract class AppControl : androidx.fragment.app.FragmentActivity() {
 
         MobileAds.initialize(this.applicationContext) {}
         loadInterstitialAd()
+        FileManager.clearVirtualDesktopIniCache()
 
         val savedTheme = getPreferences(MODE_PRIVATE).getString("app_theme", "SYSTEM")
         appTheme = AppTheme.valueOf(savedTheme ?: "SYSTEM")
