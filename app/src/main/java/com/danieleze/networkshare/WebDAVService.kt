@@ -48,8 +48,8 @@ class WebDAVService : Service(), TransferListener,
     override fun generateToken() = WebDAVService.generateToken()
     override fun showSafetyAlert(fileName: String) = postSafetyAlert(fileName)
 
-    override fun sharedItems(uri: String): Any? {
-        return FileManager.sharedItems(uri)
+    override fun getObjects(uri: String): Any? {
+        return FileManager.getObjects(uri)
     }
 
     override fun getCustomResponse(uri: String, uncPath: String): NanoHTTPD.Response? {

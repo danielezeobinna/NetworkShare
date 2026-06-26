@@ -145,7 +145,7 @@ object FileManager {
         (currentLabels - existingLabels).forEach { File(virtualRootDir, it).mkdirs() }
     }
 
-    fun sharedItems(uri: String): Any? {
+    fun getObjects(uri: String): Any? {
         val clean = uri.trimStart('/')
 
         if (clean.isEmpty()) {
