@@ -803,7 +803,7 @@ class WebDAVServer(
                 val ip = parts[0]
                 val portStr = if (parts.size > 1) parts[1] else "80"
                 val uriPath = session.uri.trimEnd('/')
-                val uncBase = """\\$ip@$portStr\DavWWWRoot"""
+                val uncBase = """\\$ip@$portStr\"""
                 val uncSubPath = if (uriPath.isEmpty() || uriPath == "/") ""
                 else uriPath.replace('/', '\\')
                 val uncFull = "$uncBase$uncSubPath"
