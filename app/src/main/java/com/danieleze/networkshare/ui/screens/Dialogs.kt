@@ -41,7 +41,12 @@ import com.danieleze.networkshare.NetworkManager
 import com.danieleze.networkshare.ui.theme.AppTheme
 
 @Composable
-fun LocationOffDialog(show: Boolean, appTheme: AppTheme, onDismiss: () -> Unit) {
+fun LocationOffDialog(
+    show: Boolean,
+    appTheme: AppTheme,
+    onDismiss: () -> Unit,
+    onOpenSettings: () -> Unit
+) {
     val context = LocalContext.current
     if (!show) return
     val isDark = when (appTheme) {
@@ -93,8 +98,7 @@ fun LocationOffDialog(show: Boolean, appTheme: AppTheme, onDismiss: () -> Unit) 
                     )
                     TextButton(onClick = {
                         onDismiss()
-                        (context as? MainActivity)?.viewModel?.pendingLocationCheck = true
-                        context.startService(Intent(context, AppControlService::class.java))
+                        onOpenSettings()
                         context.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS).apply {
                             addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY)
                         })
@@ -295,7 +299,12 @@ fun NoNetworkDialog(show: Boolean, appTheme: AppTheme, onDismiss: () -> Unit) {
 }
 
 @Composable
-fun NotificationPermissionDialog(show: Boolean, appTheme: AppTheme, onDismiss: () -> Unit) {
+fun NotificationPermissionDialog(
+    show: Boolean,
+    appTheme: AppTheme,
+    onDismiss: () -> Unit,
+    onOpenSettings: () -> Unit
+) {
     val context = LocalContext.current
     if (!show) return
     val isDark = when (appTheme) {
@@ -347,8 +356,7 @@ fun NotificationPermissionDialog(show: Boolean, appTheme: AppTheme, onDismiss: (
                     )
                     TextButton(onClick = {
                         onDismiss()
-                        (context as? MainActivity)?.viewModel?.pendingNotificationCheck = true
-                        context.startService(Intent(context, AppControlService::class.java))
+                        onOpenSettings()
                         context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
                             putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
                         })

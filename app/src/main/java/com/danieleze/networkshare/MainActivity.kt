@@ -203,7 +203,11 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                             LocationOffDialog(
                                                 show = viewModel.showLocationOffDialog,
                                                 appTheme = viewModel.appTheme,
-                                                onDismiss = { viewModel.showLocationOffDialog = false }
+                                                onDismiss = { viewModel.showLocationOffDialog = false },
+                                                onOpenSettings = {
+                                                    viewModel.pendingLocationCheck = true
+                                                    startService(Intent(this@MainActivity, AppControlService::class.java))
+                                                }
                                             )
                                             UnknownNetworkDialog(
                                                 show = viewModel.showUnknownNetworkDialog,
@@ -214,7 +218,11 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                             NotificationPermissionDialog(
                                                 show = viewModel.showNotificationDialog,
                                                 appTheme = viewModel.appTheme,
-                                                onDismiss = { viewModel.showNotificationDialog = false }
+                                                onDismiss = { viewModel.showNotificationDialog = false },
+                                                onOpenSettings = {
+                                                    viewModel.pendingNotificationCheck = true
+                                                    startService(Intent(this@MainActivity, AppControlService::class.java))
+                                                }
                                             )
                                             NoNetworkDialog(
                                                 show = viewModel.showNetworkDialog,
