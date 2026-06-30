@@ -58,6 +58,27 @@ private object PersistenceGuard {
     }
 }
 
+private object PropertyStore {
+    private const val PREFS_NAME = "webdav_properties_prefs"
+
+    fun saveProperties(context: Context, path: String, properties: Map<String, String>) {
+        val json = org.json.JSONObject(properties as Map<*, *>).toString()
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit { putString(path, json) }
+    }
+
+    fun getProperties(context: Context, path: String): Map<String, String>? {
+        val json = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(path, null) ?: return null
+        return try {
+            val obj = org.json.JSONObject(json)
+            obj.keys().asSequence().associateWith { obj.getString(it) }
+        } catch (_: Exception) {
+            null
+        }
+    }
+}
+
 // ─────────────────────────────────────────────────────────────
 //  Digest Auth Manager (embedded)
 // ─────────────────────────────────────────────────────────────
@@ -345,6 +366,7 @@ interface WebDAVServerConfig {
     fun getCustomResponse(uri: String, uncPath: String): NanoHTTPD.Response? = null
     fun getDirectoryHtml(uncPath: String): String? = null
 }
+
 // ─────────────────────────────────────────────────────────────
 //  WebDAV Server
 // ─────────────────────────────────────────────────────────────
@@ -480,16 +502,34 @@ class WebDAVServer(
                 targetFile != null && targetFile.exists() -> servePropfind(targetFile, session)
                 else -> serveNotFound()
             }
+
             Method.GET -> when {
                 targetFile != null -> serveFile(targetFile, session)
                 else -> serveNotFound()
             }
+
             Method.DELETE -> if (targetFile != null) handleDelete(targetFile) else serveNotFound()
-            Method.PUT -> if (targetFile != null) handlePut(session, targetFile) else serveNotFound()
+            Method.PUT -> if (targetFile != null) handlePut(
+                session,
+                targetFile
+            ) else serveNotFound()
+
             Method.MKCOL -> if (targetFile != null) handleMkcol(targetFile) else serveNotFound()
-            Method.PROPPATCH -> if (targetFile != null) handleProppatch(session, targetFile) else serveNotFound()
-            Method.MOVE -> if (targetFile != null) handleMove(session, targetFile) else serveNotFound()
-            Method.COPY -> if (targetFile != null) handleCopy(session, targetFile) else serveNotFound()
+            Method.PROPPATCH -> if (targetFile != null) handleProppatch(
+                session,
+                targetFile
+            ) else serveNotFound()
+
+            Method.MOVE -> if (targetFile != null) handleMove(
+                session,
+                targetFile
+            ) else serveNotFound()
+
+            Method.COPY -> if (targetFile != null) handleCopy(
+                session,
+                targetFile
+            ) else serveNotFound()
+
             Method.LOCK -> serveLock(uri)
             Method.UNLOCK -> newFixedLengthResponse(Response.Status.NO_CONTENT, MIME_PLAINTEXT, "")
             Method.HEAD -> if (targetFile != null && targetFile.exists()) {
@@ -499,6 +539,7 @@ class WebDAVServer(
                 res.addHeader("ETag", "\"${targetFile.lastModified()}-${targetFile.length()}\"")
                 res
             } else serveNotFound()
+
             else -> newFixedLengthResponse(
                 Response.Status.METHOD_NOT_ALLOWED, MIME_PLAINTEXT, "Not Supported"
             )
@@ -623,12 +664,12 @@ class WebDAVServer(
     }
 
     private fun handleProppatch(session: IHTTPSession, target: File): Response {
-        // Read the XML body (small, so safe to read directly like in handlePut)
         val contentLength = session.headers["content-length"]?.toLong() ?: 0L
         val bodyBytes = ByteArray(contentLength.toInt())
         var totalRead = 0
         while (totalRead < contentLength) {
-            val read = session.inputStream.read(bodyBytes, totalRead, (contentLength - totalRead).toInt())
+            val read =
+                session.inputStream.read(bodyBytes, totalRead, (contentLength - totalRead).toInt())
             if (read == -1) break
             totalRead += read
         }
@@ -636,22 +677,39 @@ class WebDAVServer(
 
         Log.d(tag, "PROPPATCH body for ${target.name}: $body")
 
-        // Extract Win32LastModifiedTime (the one that matters for display purposes)
-        val mtimeRegex = Regex("""Win32LastModifiedTime>([^<]+)<""")
-        val mtimeMatch = mtimeRegex.find(body)?.groupValues?.get(1)
+        // Capture the COMPLETE raw element <Prefix:Tag>...</Prefix:Tag> exactly as sent — no parsing of the value
+        val elementRegex = Regex("""<(\w+:\w+)>[^<]*</\1>""")
+        val rawElements: Map<String, String> = elementRegex.findAll(body).associate { match ->
+            val tagName = match.groupValues[1]
+            val fullElement =
+                match.value  // the entire literal "<Tag>value</Tag>" string, untouched
+            tagName to fullElement
+        }
 
-        if (mtimeMatch != null) {
-            try {
-                val sdf = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss z", Locale.US).apply {
-                    timeZone = TimeZone.getTimeZone("GMT")
+        if (rawElements.isNotEmpty()) {
+            PropertyStore.saveProperties(context, target.absolutePath, rawElements)
+            Log.d(tag, "Saved raw elements verbatim for ${target.name}: $rawElements")
+
+            // We still need the OS-level mtime updated so file listings/sorting work —
+            // this reads the saved raw element just to extract the date for setLastModified,
+            // it does NOT change what gets stored or returned.
+            rawElements["Z:Win32LastModifiedTime"]?.let { rawElement ->
+                try {
+                    val valueOnly = rawElement.substringAfter(">").substringBefore("<")
+                    val sdf = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss z", Locale.US).apply {
+                        timeZone = TimeZone.getTimeZone("GMT")
+                    }
+                    val parsedDate = sdf.parse(valueOnly)
+                    if (parsedDate != null) {
+                        val success = target.setLastModified(parsedDate.time)
+                        Log.d(
+                            tag,
+                            "setLastModified(${parsedDate.time}) on ${target.name} -> $success"
+                        )
+                    }
+                } catch (e: Exception) {
+                    Log.w(tag, "Failed to parse Win32LastModifiedTime for OS mtime: ${e.message}")
                 }
-                val parsedDate = sdf.parse(mtimeMatch)
-                if (parsedDate != null) {
-                    val success = target.setLastModified(parsedDate.time)
-                    Log.d(tag, "setLastModified(${parsedDate.time}) on ${target.name} -> $success")
-                }
-            } catch (e: Exception) {
-                Log.w(tag, "Failed to parse Win32LastModifiedTime: ${e.message}")
             }
         }
 
@@ -707,11 +765,17 @@ class WebDAVServer(
     private fun handleCopy(session: IHTTPSession, target: File): Response {
         val destinationHeader = session.headers["destination"] ?: return serveNotFound()
         return try {
-            val decodedPath = java.net.URLDecoder.decode(java.net.URL(destinationHeader).path, "UTF-8")
+            val decodedPath =
+                java.net.URLDecoder.decode(java.net.URL(destinationHeader).path, "UTF-8")
 
             val destFile: File = when (val result = config.getObjects(decodedPath)) {
                 is File -> result
-                is Int -> return newFixedLengthResponse(Response.Status.lookup(result), MIME_PLAINTEXT, "Error $result")
+                is Int -> return newFixedLengthResponse(
+                    Response.Status.lookup(result),
+                    MIME_PLAINTEXT,
+                    "Error $result"
+                )
+
                 else -> {
                     File(target.parent, decodedPath.substringAfterLast("/"))
                 }
@@ -951,14 +1015,9 @@ class WebDAVServer(
 
     private fun getObjectPropertiesXml(file: File, uri: String): String {
         val isDir = file.isDirectory
-        val sdf = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss z", Locale.US).apply {
-            timeZone = TimeZone.getTimeZone("GMT")
-        }
-        val creationDate = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
-            timeZone = TimeZone.getTimeZone("GMT")
-        }.format(Date(file.lastModified()))
-        val etag = "\"${file.lastModified()}-${file.length()}\""
+        val saved = PropertyStore.getProperties(context, file.absolutePath) ?: emptyMap()
 
+        val etag = "\"${file.lastModified()}-${file.length()}\""
         val safeDisplayName =
             file.name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         val safeUri = uri.split("/")
@@ -966,32 +1025,66 @@ class WebDAVServer(
 
         val desktopIniUri = uri.trimEnd('/') + "/desktop.ini"
         val hasDesktopIni = isDir && (config.getObjects(desktopIniUri) as? File)?.exists() == true
-        val overrideAttrs = config.getObjects("$uri::attrs") as? String
 
-        val attributes: String? = when {
-            overrideAttrs != null -> overrideAttrs
+        // Computed fallbacks — ONLY used when nothing was ever saved for that exact tag
+        val computedAttributes: String? = when {
             isDir && hasDesktopIni -> "0x00000001"
             isDir -> "0x00000010"
             else -> null
         }
+        val sdf = SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss z", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("GMT")
+        }
+        val computedLastModified =
+            "<D:getlastmodified>${sdf.format(Date(file.lastModified()))}</D:getlastmodified>"
+        val computedCreationDate = "<D:creationdate>${
+            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("GMT")
+            }.format(Date(file.lastModified()))
+        }</D:creationdate>"
+
+        // Pull raw saved elements verbatim — exactly the string Windows originally sent
+        val attributesXml = saved["Z:Win32FileAttributes"]
+            ?: (computedAttributes?.let { "<Z:Win32FileAttributes>$it</Z:Win32FileAttributes>" }
+                ?: "")
+        val lastModifiedXml = saved["Z:Win32LastModifiedTime"]?.let {
+            "<D:getlastmodified>${
+                it.substringAfter(">").substringBefore("<")
+            }</D:getlastmodified>"
+        }
+            ?: computedLastModified
+        val creationDateXml = saved["Z:Win32CreationTime"]?.let {
+            "<D:creationdate>${
+                it.substringAfter(">").substringBefore("<")
+            }</D:creationdate>"
+        }
+            ?: computedCreationDate
+
+        // Any other saved tags we don't explicitly know about — paste raw, no questions asked
+        val knownTags =
+            setOf("Z:Win32FileAttributes", "Z:Win32LastModifiedTime", "Z:Win32CreationTime")
+        val otherSavedXml = saved.entries
+            .filter { it.key !in knownTags }
+            .joinToString("\n") { it.value }  // raw element string, untouched
 
         return """
-            <D:response xmlns:Z="urn:schemas-microsoft-com:">
-                <D:href>$safeUri</D:href>
-                <D:propstat>
-                    <D:prop>
-                        <D:displayname>$safeDisplayName</D:displayname>
-                        <D:getcontentlength>${if (isDir) 0 else file.length()}</D:getcontentlength>
-                        <D:resourcetype>${if (isDir) "<D:collection/>" else ""}</D:resourcetype>
-                        ${if (attributes != null) "<Z:Win32FileAttributes>$attributes</Z:Win32FileAttributes>" else ""}
-                        <D:getlastmodified>${sdf.format(Date(file.lastModified()))}</D:getlastmodified>
-                        <D:creationdate>$creationDate</D:creationdate>
-                        <D:getetag>$etag</D:getetag>
-                    </D:prop>
-                    <D:status>HTTP/1.1 200 OK</D:status>
-                </D:propstat>
-            </D:response>
-        """.trimIndent()
+        <D:response xmlns:Z="urn:schemas-microsoft-com:">
+            <D:href>$safeUri</D:href>
+            <D:propstat>
+                <D:prop>
+                    <D:displayname>$safeDisplayName</D:displayname>
+                    <D:getcontentlength>${if (isDir) 0 else file.length()}</D:getcontentlength>
+                    <D:resourcetype>${if (isDir) "<D:collection/>" else ""}</D:resourcetype>
+                    $attributesXml
+                    $lastModifiedXml
+                    $creationDateXml
+                    <D:getetag>$etag</D:getetag>
+                    $otherSavedXml
+                </D:prop>
+                <D:status>HTTP/1.1 200 OK</D:status>
+            </D:propstat>
+        </D:response>
+    """.trimIndent()
     }
 
     // ── Lifecycle ────────────────────────────────────────────

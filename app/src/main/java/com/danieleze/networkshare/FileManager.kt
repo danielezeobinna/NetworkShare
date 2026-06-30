@@ -18,7 +18,6 @@ object FileManager {
     var isScanning    = mutableStateOf(false)
     var tempPriorityPath: String? = null
     var storageRoots  = mutableMapOf<String, String>()
-    val customAttributes = mutableMapOf<String, String>()
 
     private val storageLabelIniContent = """
     [ViewState]
@@ -188,15 +187,6 @@ object FileManager {
                 val content = desktopIniContent[folderName] ?: return null
                 return desktopIniFile("${label}_$folderName", content) ?: 404
             }
-            // not ours — fall through to normal file handling
-        }
-
-        if (clean.endsWith("::attrs")) {
-            val realPath = storageRoots[label]?.let { root ->
-                val realRest = rest.removeSuffix("::attrs")
-                if (realRest.isEmpty()) root else "$root/$realRest"
-            } ?: return null
-            return customAttributes[realPath]
         }
 
         val isAllowed = selectedPaths.any { allowed ->
