@@ -1,4 +1,4 @@
-package com.danieleze.networkshare
+package com.danieleze.networkshare.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -45,6 +45,8 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.danieleze.networkshare.R
+import com.danieleze.networkshare.draggableScrollbar
 import kotlinx.coroutines.delay
 
 @Composable

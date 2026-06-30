@@ -1,4 +1,4 @@
-package com.danieleze.networkshare
+package com.danieleze.networkshare.ui.screens
 
 import android.content.Intent
 import android.provider.Settings
@@ -34,6 +34,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.danieleze.networkshare.WebDAVService
+import com.danieleze.networkshare.MainActivity
+import com.danieleze.networkshare.AppControlService
+import com.danieleze.networkshare.NetworkManager
 import com.danieleze.networkshare.ui.theme.AppTheme
 
 @Composable

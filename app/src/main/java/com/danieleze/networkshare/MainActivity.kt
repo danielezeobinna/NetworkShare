@@ -49,6 +49,15 @@ import androidx.core.view.WindowCompat
 import com.danieleze.networkshare.AppControl.Companion.isUnlocked
 import com.danieleze.networkshare.ui.theme.AppTheme
 import com.danieleze.networkshare.ui.theme.NetworkShareTheme
+import com.danieleze.networkshare.ui.screens.DiscoveryScreen
+import com.danieleze.networkshare.ui.screens.BiometricGateScreen
+import com.danieleze.networkshare.ui.screens.FilePickerSection
+import com.danieleze.networkshare.ui.screens.NetworkListScreen
+import com.danieleze.networkshare.ui.screens.LocationOffDialog
+import com.danieleze.networkshare.ui.screens.UnknownNetworkDialog
+import com.danieleze.networkshare.ui.screens.NotificationPermissionDialog
+import com.danieleze.networkshare.ui.screens.NoNetworkDialog
+import com.danieleze.networkshare.ui.screens.UserGuideScreen
 import com.google.android.gms.ads.AdListener
 import com.google.android.gms.ads.AdRequest
 import com.google.android.gms.ads.AdSize
@@ -119,7 +128,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         if (savedInstanceState == null) isUnlocked = false
 
         viewModel.isPending = false
-        viewModel.isDiscoveryOn = isServiceRunning()
+        viewModel.isDiscoveryOn = viewModel.isServiceRunning()
         WebDAVService.loadPaths(this.applicationContext)
 
         if (savedInstanceState == null) {
@@ -396,7 +405,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 
     override fun onResume() {
         super.onResume()
-        viewModel.isDiscoveryOn = isServiceRunning()
+        viewModel.isDiscoveryOn = viewModel.isServiceRunning()
 
         if (pausedAtTime > 0L && System.currentTimeMillis() - pausedAtTime >= 30_000L) {
             isUnlocked = false
@@ -596,8 +605,6 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
             }
         }
     }
-
-    fun isServiceRunning() = WebDAVService.isRunning
 
     private fun toggleService(start: Boolean) {
         val intent = Intent(this, WebDAVService::class.java)

@@ -62,6 +62,8 @@ class AppControl(application: Application) : androidx.lifecycle.AndroidViewModel
         appTheme = theme
         prefs().edit { putString("app_theme", theme.name) }
     }
+
+    fun isServiceRunning() = WebDAVService.isRunning
 }
 
 

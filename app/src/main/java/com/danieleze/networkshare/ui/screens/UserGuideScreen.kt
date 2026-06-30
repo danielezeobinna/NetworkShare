@@ -1,4 +1,4 @@
-package com.danieleze.networkshare
+package com.danieleze.networkshare.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -24,6 +24,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.danieleze.networkshare.R
 
 @Composable
 fun UserGuideScreen(onBack: () -> Unit) {
