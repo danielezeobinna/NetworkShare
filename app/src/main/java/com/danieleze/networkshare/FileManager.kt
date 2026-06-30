@@ -1,5 +1,6 @@
 package com.danieleze.networkshare
 
+import android.content.Context
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import java.io.File
@@ -125,6 +126,21 @@ object FileManager {
         if (cacheDir.exists()) {
             cacheDir.listFiles()?.forEach { it.delete() }
         }
+    }
+
+    fun getAvailableStorages(context: Context): List<File> {
+        val storages = mutableListOf<File>()
+        context.getExternalFilesDirs(null).forEach { dir ->
+            if (dir != null) {
+                val path = dir.absolutePath
+                val rootPath = if (path.contains("/Android/")) path.split("/Android/")[0] else path
+                val rootFile = File(rootPath)
+                if (rootFile.exists() && rootFile.canRead() && !storages.contains(rootFile)) {
+                    storages.add(rootFile)
+                }
+            }
+        }
+        return storages
     }
 
     fun toggleSelection(path: String) {

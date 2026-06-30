@@ -64,7 +64,6 @@ fun FilePickerSection(
     currentPath: MutableState<File?>
 ) {
     val context = LocalContext.current
-    val activity = context as MainActivity
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
@@ -82,7 +81,7 @@ fun FilePickerSection(
                 onBack()
             } else {
                 isExiting = true; delay(220); isExiting = false
-                val storages = activity.getAvailableStorages()
+                val storages = FileManager.getAvailableStorages(context)
                 currentPath =
                     if (storages.any { it.absolutePath == currentPath?.absolutePath }) null
                     else currentPath?.parentFile
@@ -107,7 +106,7 @@ fun FilePickerSection(
         if (currentPath == null) {
             FileManager.scannedItems.clear()
             FileManager.scannedItems.addAll(
-                activity.getAvailableStorages().map { FolderItem(it, it.name, true) }
+                FileManager.getAvailableStorages(context).map { FolderItem(it, it.name, true) }
             )
         } else {
             FileManager.requestFolderScan(currentPath)
