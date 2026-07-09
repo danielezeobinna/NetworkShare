@@ -35,7 +35,10 @@ class WebDAVService : Service(), TransferListener,
     private val channelId = "WebDAV_Service_Channel"
     private val tag = "WebDAVService"
     private val safetyChannelId = "WebDAV_Safety_Alerts"
-
+    private val wsDiscoveryService = WSDiscoveryService(
+        context = this,
+        friendlyName = Build.MODEL
+    )
     // ── NetworkEventListener implementation ──────────────────
     // NetworkManager calls these when network state changes.
 
@@ -360,12 +363,14 @@ class WebDAVService : Service(), TransferListener,
         }
 
         isStartingServers = false
+        wsDiscoveryService.start()
         broadcastCurrentAddresses()
     }
 
     private fun stopActiveServers() {
         activeServers.forEach { it.stopServer() }
         activeServers.clear()
+        wsDiscoveryService.stop()
     }
 
     private fun isOnHotspot(): Boolean {
