@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.os.IBinder
 import android.util.Log
-import android.os.storage.StorageManager
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.graphics.toColorInt
 import androidx.core.app.NotificationCompat
@@ -45,13 +44,14 @@ class WebDAVService : Service(), TransferListener,
     override fun getUsername() = username.value
     override fun getPassword() = password.value
     override fun isAuthEnabled() = isAuthEnabled.value
-    override fun isNetworkTrusted() = isNetworkTrusted.value
+    override fun getIpAddress(): String? = NetworkManager.getLocalIpAddress()
     override fun isCancelled(fileName: String) = WebDAVService.isCancelled(fileName)
     override fun clearCancel(fileName: String) = WebDAVService.clearCancel(fileName)
     override fun generateToken() = WebDAVService.generateToken()
     override fun showSafetyAlert(fileName: String) = postSafetyAlert(fileName)
 
     override fun getObjects(uri: String): Any? {
+        if (!isNetworkTrusted.value) return 403
         return FileManager.getObjects(uri)
     }
 
@@ -102,9 +102,9 @@ class WebDAVService : Service(), TransferListener,
     }
 
     override fun onRefreshServersIfNeeded() {
-        val newIp = NetworkManager.getLocalIpAddress() ?: "0.0.0.0"
+        val newIp = NetworkManager.getLocalIpAddress()
         val currentIp = activeServers.firstOrNull()?.boundIp
-        if (newIp != currentIp && newIp != "0.0.0.0") {
+        if (newIp != null && newIp != currentIp) {
             startWebDAVServers()
         }
     }
@@ -190,6 +190,7 @@ class WebDAVService : Service(), TransferListener,
             .build()
 
         NetworkManager.registerHardwareReceiver(this)
+        FileManager.registerMediaReceiver(this)
 
         // Acquire CPU wake lock
         if (wakeLock == null) {
@@ -255,6 +256,7 @@ class WebDAVService : Service(), TransferListener,
         isRunning = false
         Log.d(tag, "Service stopping, cleaning up servers...")
         NetworkManager.unregisterHardwareReceiver(this)
+        FileManager.unregisterMediaReceiver(this)
         activeServers.forEach { it.stopServer() }
         activeServers.clear()
         val stopIntent = Intent("com.danieleze.networkshare.SERVER_STOPPED")
@@ -274,92 +276,37 @@ class WebDAVService : Service(), TransferListener,
     // ── Server management ─────────────────────────────────────
 
     private var isStartingServers = false
-    private var nextPort = 8080
 
     private fun startWebDAVServers() {
         if (isStartingServers) return
         isStartingServers = true
         stopActiveServers()
-        NetworkManager.load(this)
+
         ensureChannel(getSystemService(NotificationManager::class.java))
+        NetworkManager.refreshAll(this, currentSsid, wifiJustEnabled) { wifiJustEnabled = false }
 
-        if (!isOnHotspot()) {
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                NetworkManager.updateNetworkTrust(
-                    context = this,
-                    currentSsid = currentSsid,
-                    wifiJustEnabled = wifiJustEnabled,
-                    onWifiJustEnabledConsumed = { wifiJustEnabled = false }
-                )
-            }, 1500)
+        FileManager.refreshStorageRoots(this)
+        wsDiscoveryService.start()
+
+        val addresses = NetworkManager.getAllLocalIpAddresses()
+        if (addresses.size > 1) {
+            showMultipleNetworksWarning()
         }
 
-        val boundIp = NetworkManager.getLocalIpAddress() ?: "0.0.0.0"
-
-        FileManager.storageRoots.clear()
-        val storageManager = getSystemService(STORAGE_SERVICE) as StorageManager
-        val externalDirs = getExternalFilesDirs(null).filterNotNull()
-        val usedLabels = mutableSetOf<String>()
-
-        externalDirs.forEach { dir ->
-            val volume = storageManager.getStorageVolume(dir) ?: return@forEach
-
-            val rootPath = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                volume.directory?.absolutePath ?: dir.absolutePath.split("/Android/")[0]
-            } else {
-                dir.absolutePath.split("/Android/")[0]
-            }
-
-            val description = volume.getDescription(this) ?: "External Drive"
-
-            val label = when {
-                !volume.isRemovable || volume.isPrimary -> "Internal Storage"
-                else -> {
-                    val volumeName = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                        volume.mediaStoreVolumeName?.lowercase() ?: ""
-                    } else ""
-
-                    val containsUsb = volumeName.contains("usb") ||
-                            description.lowercase().contains("usb") ||
-                            rootPath.lowercase().contains("usb")
-
-                    val containsSd = volumeName.contains("sd") ||
-                            description.lowercase().contains("sd") ||
-                            rootPath.lowercase().contains("sd")
-
-                    val isUsb = containsUsb && !containsSd
-
-                    val kind = if (isUsb) "USB OTG" else "SD Card"
-
-                    if (description.contains(kind, ignoreCase = true) ||
-                        (isUsb && description.contains("usb", ignoreCase = true))) {
-                        description
-                    } else {
-                        "$kind ($description)"
-                    }
-                }
-            }
-
-            // Disambiguate if two volumes resolve to the same label
-            var finalLabel = label
-            var suffix = 2
-            while (!usedLabels.add(finalLabel)) {
-                finalLabel = "$label #$suffix"
-                suffix++
-            }
-
-            FileManager.storageRoots[finalLabel] = rootPath
+        val ip = addresses.firstOrNull()
+        if (ip == null) {
+            Log.w(tag, "No IP address available — server not started")
+            isStartingServers = false
+            broadcastCurrentAddresses()
+            return
         }
 
-        nextPort = 8080
-        val port = findAvailablePort()
-        try {
-            activeServers.add(
-                WebDAVServer(port, this, this, this, boundIp)
-            )
-            Log.d(tag, "Unified server started on port $port")
-        } catch (e: Exception) {
-            Log.e(tag, "Failed to start server: ${e.message}")
+        val server = WebDAVServer.startServer(this, this, this)
+        if (server != null) {
+            activeServers.add(server)
+            Log.d(tag, "Unified server started on port ${server.port}")
+        } else {
+            Log.e(tag, "Failed to start server after multiple attempts")
         }
 
         isStartingServers = false
@@ -371,30 +318,6 @@ class WebDAVService : Service(), TransferListener,
         activeServers.forEach { it.stopServer() }
         activeServers.clear()
         wsDiscoveryService.stop()
-    }
-
-    private fun isOnHotspot(): Boolean {
-        return try {
-            java.net.NetworkInterface.getNetworkInterfaces().toList().any { intf ->
-                intf.isUp && !intf.isLoopback &&
-                        (intf.name.contains("ap") || intf.name.contains("softap"))
-            }
-        } catch (_: Exception) { false }
-    }
-
-    private fun findAvailablePort(): Int {
-        while (isPortBusy(nextPort)) {
-            nextPort++
-        }
-        return nextPort++
-    }
-
-
-
-    private fun isPortBusy(port: Int): Boolean {
-        return try {
-            java.net.ServerSocket(port).use { false }
-        } catch (_: Exception) { true }
     }
 
     private fun broadcastCurrentAddresses() {
@@ -598,6 +521,16 @@ class WebDAVService : Service(), TransferListener,
             enableLights(true)
         }
         manager?.createNotificationChannel(channel)
+    }
+
+    private fun showMultipleNetworksWarning() {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            android.widget.Toast.makeText(
+                this,
+                "You're connected to multiple networks. For a secure, reliable share, connect to only one at a time.",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+        }
     }
 
     fun postSafetyAlert(fileName: String) {

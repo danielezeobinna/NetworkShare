@@ -357,12 +357,13 @@ interface WebDAVServerConfig {
     fun getUsername(): String
     fun getPassword(): String
     fun isAuthEnabled(): Boolean
-    fun isNetworkTrusted(): Boolean
     fun isCancelled(fileName: String): Boolean
     fun clearCancel(fileName: String)
     fun generateToken(): String
     fun showSafetyAlert(fileName: String)
     fun getObjects(uri: String): Any?
+    fun getIpAddress(): String?
+    fun getPort(): Int? = null
     fun getCustomResponse(uri: String, uncPath: String): NanoHTTPD.Response? = null
     fun getDirectoryHtml(uncPath: String): String? = null
 }
@@ -370,27 +371,39 @@ interface WebDAVServerConfig {
 // ─────────────────────────────────────────────────────────────
 //  WebDAV Server
 // ─────────────────────────────────────────────────────────────
-class WebDAVServer(
-    val port: Int = 8080,
+class WebDAVServer private constructor(
+    val port: Int,
     private val context: Context,
     private val listener: TransferListener,
     private val config: WebDAVServerConfig,
-    val boundIp: String = "0.0.0.0",
+    val boundIp: String = config.getIpAddress() ?: "0.0.0.0"
 ) : FastHTTPD(boundIp, port) {
 
     private var isShuttingDown = false
     private val tag = "WebDAVServer:$port"
 
     init {
-        DigestAuthManager.setCredentials(
-            config.getUsername(),
-            config.getPassword()
-        )
-        try {
-            start(SOCKET_READ_TIMEOUT, false)
-            //Log.d(tag, "Server started at ${rootDirectory.absolutePath}")
-        } catch (e: IOException) {
-            Log.e(tag, "Could not start server on port $port", e)
+        DigestAuthManager.setCredentials(config.getUsername(), config.getPassword())
+    }
+
+    companion object {
+        fun startServer(
+            context: Context,
+            listener: TransferListener,
+            config: WebDAVServerConfig
+        ): WebDAVServer? {
+            var candidatePort = config.getPort() ?: 8080
+            repeat(50) {
+                val server = WebDAVServer(candidatePort, context, listener, config)
+                try {
+                    server.start(SOCKET_READ_TIMEOUT, false)
+                    Log.d(server.tag, "Server started on port $candidatePort")
+                    return server
+                } catch (_: IOException) {
+                    candidatePort++
+                }
+            }
+            return null
         }
     }
 
@@ -413,13 +426,7 @@ class WebDAVServer(
     }
 
     private fun serveInternal(session: IHTTPSession): Response {
-        if (boundIp == "0.0.0.0") {
-            return newFixedLengthResponse(
-                Response.Status.FORBIDDEN,
-                MIME_PLAINTEXT,
-                "No valid network interface available."
-            )
-        }
+
         if (isShuttingDown) {
             return newFixedLengthResponse(
                 Response.Status.NOT_FOUND,
@@ -430,14 +437,6 @@ class WebDAVServer(
 
         val customResponse = config.getCustomResponse(session.uri, "")
         if (customResponse != null) return customResponse
-
-        if (!config.isNetworkTrusted()) {
-            return newFixedLengthResponse(
-                Response.Status.FORBIDDEN,
-                MIME_PLAINTEXT,
-                "Network not trusted."
-            )
-        }
 
         // OPTIONS must always pass unauthenticated – Windows probes this first
         // before it even has credentials to send.

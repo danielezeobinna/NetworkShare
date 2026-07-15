@@ -1,6 +1,9 @@
 package com.danieleze.networkshare
 
 import android.content.Context
+import android.content.Intent
+import android.os.Build
+import android.os.storage.StorageManager
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import java.io.File
@@ -100,7 +103,36 @@ object FileManager {
         IconResource=%SystemRoot%\System32\imageres.dll,42
     """.trimIndent()
     )
+    private var mediaReceiver: android.content.BroadcastReceiver? = null
 
+    fun registerMediaReceiver(context: Context) {
+        if (mediaReceiver != null) return
+
+        mediaReceiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(ctx: Context, intent: Intent) {
+                refreshStorageRoots(context.applicationContext)
+            }
+        }
+
+        val filter = android.content.IntentFilter().apply {
+            addAction(Intent.ACTION_MEDIA_MOUNTED)
+            addAction(Intent.ACTION_MEDIA_UNMOUNTED)
+            addAction(Intent.ACTION_MEDIA_EJECT)
+            addAction(Intent.ACTION_MEDIA_REMOVED)
+            addDataScheme("file")
+        }
+
+        context.applicationContext.registerReceiver(mediaReceiver, filter)
+    }
+
+    fun unregisterMediaReceiver(context: Context) {
+        mediaReceiver?.let {
+            try {
+                context.applicationContext.unregisterReceiver(it)
+            } catch (_: Exception) { }
+        }
+        mediaReceiver = null
+    }
     private fun desktopIniFile(cacheKey: String, content: String): File? {
         val cacheDir = File(System.getProperty("java.io.tmpdir"), "virtual_desktop_ini")
         if (!cacheDir.exists()) cacheDir.mkdirs()
@@ -225,5 +257,33 @@ object FileManager {
                 isScanning.value = false
             }
         }.start()
+    }
+
+    fun refreshStorageRoots(context: Context) {
+        storageRoots.clear()
+        val storageManager = context.getSystemService(Context.STORAGE_SERVICE) as StorageManager
+        val externalDirs = context.getExternalFilesDirs(null).filterNotNull()
+        val usedLabels = mutableSetOf<String>()
+
+        externalDirs.forEach { dir ->
+            val volume = storageManager.getStorageVolume(dir) ?: return@forEach
+
+            val rootPath = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                volume.directory?.absolutePath ?: dir.absolutePath.split("/Android/")[0]
+            } else {
+                dir.absolutePath.split("/Android/")[0]
+            }
+
+            val description = volume.getDescription(context) ?: "External Drive"
+
+            var finalLabel = description
+            var suffix = 2
+            while (!usedLabels.add(finalLabel)) {
+                finalLabel = "$description #$suffix"
+                suffix++
+            }
+
+            storageRoots[finalLabel] = rootPath
+        }
     }
 }

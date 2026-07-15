@@ -10,6 +10,7 @@ import androidx.core.content.edit
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import android.app.ActivityManager
+import java.util.Collections
 
 // ─────────────────────────────────────────────────────────────
 //  Network Manager
@@ -47,15 +48,12 @@ object NetworkManager {
     }
 
     private var eventListener: NetworkEventListener? = null
+    private var isHotspotActive = false
+    private var hardwareReceiver: BroadcastReceiver? = null
 
     fun setEventListener(listener: NetworkEventListener?) {
         eventListener = listener
     }
-
-    // ── Hardware broadcast receiver ───────────────────────────
-    // Listens for hotspot and Wi-Fi toggle events and delegates
-    // network-state decisions to NetworkManager.
-    private var hardwareReceiver: BroadcastReceiver? = null
 
     fun registerHardwareReceiver(context: Context) {
         hardwareReceiver = object : BroadcastReceiver() {
@@ -65,8 +63,14 @@ object NetworkManager {
                 if (action == "android.net.wifi.WIFI_AP_STATE_CHANGED") {
                     val state = intent.getIntExtra("wifi_state", -1)
                     when (state) {
-                        13 -> eventListener?.onHotspotEnabled()
-                        11, 14 -> verifyAndStop()
+                        13 -> {
+                            isHotspotActive = true
+                            eventListener?.onHotspotEnabled()
+                        }
+                        11, 14 -> {
+                            isHotspotActive = false
+                            verifyAndStop()
+                        }
                     }
                 }
 
@@ -104,6 +108,16 @@ object NetworkManager {
         blockedNetworks.clear()
         allowedNetworks.addAll(prefs.getStringSet(KEY_ALLOWED, emptySet()) ?: emptySet())
         blockedNetworks.addAll(prefs.getStringSet(KEY_BLOCKED, emptySet()) ?: emptySet())
+    }
+
+    fun refreshAll(
+        context: Context,
+        currentSsid: String,
+        wifiJustEnabled: Boolean,
+        onWifiJustEnabledConsumed: () -> Unit
+    ) {
+        load(context)
+        recheckTrustAfterRestart(context, currentSsid, wifiJustEnabled, onWifiJustEnabledConsumed)
     }
 
     private fun save(context: Context) {
@@ -164,56 +178,36 @@ object NetworkManager {
 
     // ── Network utilities ─────────────────────────────────────
 
-    /**
-     * Returns the device's local IPv4 address on the active Wi-Fi,
-     * hotspot, soft-AP, or RNDIS (USB tethering) interface.
-     * Returns null if no suitable address is found.
-     */
-    fun getLocalIpAddress(): String? {
-        return try {
-            val interfaces = NetworkInterface.getNetworkInterfaces().toList()
-                .filter { intf ->
-                    intf.isUp && !intf.isLoopback && (
-                            intf.name.contains("wlan") ||
-                                    intf.name.contains("ap") ||
-                                    intf.name.contains("softap") ||
-                                    intf.name.contains("rndis")
-                            )
+    fun getAllLocalIpAddresses(): List<String> {
+        val localAddresses = mutableListOf<String>()
+        try {
+            val interfaces = Collections.list(NetworkInterface.getNetworkInterfaces())
+            for (networkInterface in interfaces) {
+                if (!networkInterface.isUp || networkInterface.isLoopback) continue
+
+                val name = networkInterface.name.lowercase()
+                if (name.startsWith("rmnet") ||
+                    name.startsWith("ccmni") ||
+                    name.startsWith("pdp")
+                ) continue
+
+                val addresses = Collections.list(networkInterface.inetAddresses)
+                for (inetAddress in addresses) {
+                    if (inetAddress is Inet4Address && inetAddress.isSiteLocalAddress) {
+                        inetAddress.hostAddress?.let { ip -> localAddresses.add(ip) }
+                    }
                 }
-
-            val priority = listOf("rndis", "softap", "ap", "wlan")
-
-            for (prefix in priority) {
-                val match = interfaces
-                    .firstOrNull { it.name.contains(prefix) }
-                    ?.inetAddresses?.toList()
-                    ?.filterIsInstance<Inet4Address>()
-                    ?.firstOrNull { !it.isLoopbackAddress }
-                    ?.hostAddress
-                if (match != null) return match
             }
-
-            null
-        } catch (_: Exception) { null }
+        } catch (_: Exception) { }
+        return localAddresses.distinct()
     }
+
+    fun getLocalIpAddress(): String? = getAllLocalIpAddresses().firstOrNull()
 
     /**
      * Returns true if any Wi-Fi, hotspot, or soft-AP interface is
      * currently up and has a non-loopback address.
      */
-    fun isNetworkAvailable(): Boolean {
-        return try {
-            NetworkInterface.getNetworkInterfaces().toList().any { intf ->
-                intf.isUp && !intf.isLoopback && (
-                        intf.name.contains("wlan") ||
-                                intf.name.contains("ap") ||
-                                intf.name.contains("softap")
-                        )
-            }
-        } catch (_: Exception) {
-            false
-        }
-    }
 
     // ── Network callback registration ─────────────────────────
 
@@ -338,17 +332,9 @@ object NetworkManager {
         wifiJustEnabled: Boolean,
         onWifiJustEnabledConsumed: () -> Unit
     ) {
-        val isOnHotspot = try {
-            val wifiManager = context.applicationContext
-                .getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager
-            val method = wifiManager.javaClass.getDeclaredMethod("isWifiApEnabled")
-            method.isAccessible = true
-            method.invoke(wifiManager) as Boolean
-        } catch (_: Exception) { false }
-
-        if (isOnHotspot) {
+        if (isHotspotActive) {
             eventListener?.onNetworkTrustChanged(NetworkState.TRUSTED, "")
-            Log.d(TAG, "Hotspot active — always trusted")
+            Log.d(TAG, "Hotspot active — trusted, regardless of any WiFi connection")
             return
         }
 
@@ -381,10 +367,6 @@ object NetworkManager {
                 eventListener?.onNetworkTrustChanged(NetworkState.NO_NETWORK, ssid)
             }
 
-            isHotspot(ssid) -> {
-                eventListener?.onNetworkTrustChanged(NetworkState.TRUSTED, ssid)
-            }
-
             getTrust(ssid) == Trust.ALLOWED || getTrust(ssid) == Trust.ALLOW_ONCE -> {
                 eventListener?.onNetworkTrustChanged(NetworkState.TRUSTED, ssid)
             }
@@ -395,9 +377,26 @@ object NetworkManager {
         }
     }
 
+    fun recheckTrustAfterRestart(
+        context: Context,
+        currentSsid: String,
+        wifiJustEnabled: Boolean,
+        onWifiJustEnabledConsumed: () -> Unit
+    ) {
+        if (isHotspotActive) return
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            updateNetworkTrust(
+                context = context,
+                currentSsid = currentSsid,
+                wifiJustEnabled = wifiJustEnabled,
+                onWifiJustEnabledConsumed = onWifiJustEnabledConsumed
+            )
+        }, 1500)
+    }
+
     fun verifyAndStop() {
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            if (!isNetworkAvailable()) {
+            if (getLocalIpAddress() == null) {
                 eventListener?.onNetworkTrustChanged(NetworkState.NO_NETWORK, "")
             } else {
                 eventListener?.onRefreshServersIfNeeded()
