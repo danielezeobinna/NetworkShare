@@ -2,6 +2,7 @@ package com.danieleze.networkshare
 
 import android.os.Build
 import android.util.Log
+import androidx.core.content.edit
 import com.jaredrummler.android.device.DeviceName
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -26,14 +27,18 @@ import java.net.MulticastSocket
 class WSDiscoveryService(
     private val context: android.content.Context,
     var friendlyName: String,
-    private val httpPort: Int = 49152
-){
+    private val httpPort: Int = 5357
+) {
     companion object {
         private const val TAG = "WSDiscoveryService"
         private const val MULTICAST_ADDR = "239.255.255.250"
         private const val MULTICAST_PORT = 3702
         private const val SSDP_PORT = 1900
         private const val SSDP_DEVICE_TYPE = "urn:schemas-upnp-org:device:phone:1"
+        private const val PREFS_NAME = "wsd_discovery_prefs"
+        private const val KEY_INSTANCE_ID = "instance_id"
+        private const val KEY_METADATA_VERSION = "metadata_version"
+        private const val KEY_LAST_FRIENDLY_NAME = "last_friendly_name"
     }
 
     // Stable per-install UUID. Persist this in SharedPreferences if you
@@ -46,6 +51,15 @@ class WSDiscoveryService(
     private var modelName = "$manufacturer $modelNumber"
     private var multicastLock: android.net.wifi.WifiManager.MulticastLock? = null
     private val running = AtomicBoolean(false)
+    private val prefs by lazy {
+        context.applicationContext.getSharedPreferences(
+            PREFS_NAME,
+            android.content.Context.MODE_PRIVATE
+        )
+    }
+    private var appInstanceId: Int = 1
+    private var messageNumber: Int = 0
+    private var metadataVersion: Int = 1
     private var multicastSocket: DatagramSocket? = null
     private var httpServerSocket: ServerSocket? = null
     private var llmnrSocket: MulticastSocket? = null
@@ -55,6 +69,8 @@ class WSDiscoveryService(
 
     fun start() {
         if (running.getAndSet(true)) return
+        loadAndIncrementInstanceId()
+        checkAndBumpMetadataVersion()
         getModelName()
         logAvailableInterfaces()
         thread(name = "WSD-Multicast") { runMulticastListener() }
@@ -84,7 +100,38 @@ class WSDiscoveryService(
             }
         }
     }
+
     // ---------- UDP multicast Probe/ProbeMatch ----------
+    private fun loadAndIncrementInstanceId() {
+        val stored = prefs.getInt(KEY_INSTANCE_ID, 0)
+        appInstanceId = stored + 1
+        messageNumber = 0
+        prefs.edit { putInt(KEY_INSTANCE_ID, appInstanceId) }
+        Log.d(TAG, "WSD InstanceId incremented to $appInstanceId")
+    }
+
+    private fun checkAndBumpMetadataVersion() {
+        val storedVersion = prefs.getInt(KEY_METADATA_VERSION, 0)
+        val lastName = prefs.getString(KEY_LAST_FRIENDLY_NAME, null)
+
+        if (storedVersion == 0) {
+            // First run ever
+            metadataVersion = 1
+            prefs.edit {
+                putInt(KEY_METADATA_VERSION, metadataVersion)
+                putString(KEY_LAST_FRIENDLY_NAME, friendlyName)
+            }
+        } else if (lastName != friendlyName) {
+            metadataVersion = storedVersion + 1
+            prefs.edit {
+                putInt(KEY_METADATA_VERSION, metadataVersion)
+                putString(KEY_LAST_FRIENDLY_NAME, friendlyName)
+            }
+            Log.d(TAG, "Metadata changed, MetadataVersion bumped to $metadataVersion")
+        } else {
+            metadataVersion = storedVersion
+        }
+    }
 
     private fun runMulticastListener() {
         try {
@@ -114,7 +161,10 @@ class WSDiscoveryService(
                 val packet = DatagramPacket(buf, buf.size)
                 try {
                     mcastSocket.receive(packet)
-                    Log.d(TAG, "RAW PACKET from ${packet.address}:${packet.port}, len=${packet.length}")
+                    Log.d(
+                        TAG,
+                        "RAW PACKET from ${packet.address}:${packet.port}, len=${packet.length}"
+                    )
                 } catch (e: Exception) {
                     if (running.get()) Log.w(TAG, "Multicast receive error", e)
                     continue
@@ -126,14 +176,33 @@ class WSDiscoveryService(
                     val relatesTo = extractMessageId(msg)
                     val response = buildProbeMatch(relatesTo)
                     val respBytes = response.toByteArray(Charsets.UTF_8)
-                    val respPacket = DatagramPacket(
-                        respBytes, respBytes.size, packet.address, packet.port
-                    )
                     try {
-                        DatagramSocket().use { it.send(respPacket) }
-                        Log.d(TAG, "Sent ProbeMatch to ${packet.address}:${packet.port}")
+                        DatagramSocket(null).apply {
+                            reuseAddress = true
+                            bind(InetSocketAddress(MULTICAST_PORT))
+                        }.use { sendSocket ->
+                            repeat(2) { attempt ->
+                                try {
+                                    val respPacket = DatagramPacket(
+                                        respBytes, respBytes.size, packet.address, packet.port
+                                    )
+                                    sendSocket.send(respPacket)
+                                    Log.d(
+                                        TAG,
+                                        "Sent ProbeMatch (attempt ${attempt + 1}) to ${packet.address}:${packet.port} from local port ${sendSocket.localPort}"
+                                    )
+                                } catch (e: Exception) {
+                                    Log.w(
+                                        TAG,
+                                        "Failed sending ProbeMatch (attempt ${attempt + 1})",
+                                        e
+                                    )
+                                }
+                                if (attempt == 0) Thread.sleep(75)
+                            }
+                        }
                     } catch (e: Exception) {
-                        Log.w(TAG, "Failed sending ProbeMatch", e)
+                        Log.w(TAG, "Failed to create send socket for ProbeMatch", e)
                     }
                 }
             }
@@ -141,7 +210,6 @@ class WSDiscoveryService(
                 mcastSocket.leaveGroup(InetSocketAddress(group, MULTICAST_PORT), findInterface())
                 mcastSocket.close()
             } catch (_: Exception) {
-                // already closed by stop(), that's fine
             }
         } catch (e: Exception) {
             Log.e(TAG, "Multicast listener failed", e)
@@ -164,37 +232,29 @@ class WSDiscoveryService(
         return if (start != -1 && end != -1) xml.substring(start + tag.length + 2, end) else ""
     }
 
-    private fun localIp(): String {
-        findInterface().inetAddresses.toList().forEach {
-            if (!it.isLoopbackAddress && it.hostAddress?.contains(":") == false) {
-                return it.hostAddress ?: "0.0.0.0"
-            }
-        }
-        return "0.0.0.0"
-    }
+    private fun localIp(): String? = NetworkManager.getLocalIpAddress()
 
-    private fun buildProbeMatch(relatesToId: String): String = """
-        <?xml version="1.0" encoding="utf-8"?>
-        <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:wsa="http://schemas.xmlsoap.org/ws/2004/08/addressing" xmlns:wsd="http://schemas.xmlsoap.org/ws/2005/04/discovery" xmlns:wsdp="http://schemas.xmlsoap.org/ws/2006/02/devprof" xmlns:pub="http://schemas.microsoft.com/windows/pub/2005/07">
-        <soap:Header>
-        <wsa:To>http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous</wsa:To>
-        <wsa:Action>http://schemas.xmlsoap.org/ws/2005/04/discovery/ProbeMatches</wsa:Action>
-        <wsa:MessageID>urn:uuid:${UUID.randomUUID()}</wsa:MessageID>
-        <wsa:RelatesTo>$relatesToId</wsa:RelatesTo>
-        <wsd:AppSequence InstanceId="1" SequenceId="urn:uuid:${deviceUuid}" MessageNumber="1"></wsd:AppSequence>
-        </soap:Header>
-        <soap:Body>
-        <wsd:ProbeMatches>
-        <wsd:ProbeMatch>
-        <wsa:EndpointReference><wsa:Address>urn:uuid:$deviceUuid</wsa:Address></wsa:EndpointReference>
-        <wsd:Types>wsdp:Device</wsd:Types>
-        <wsd:XAddrs>http://${localIp()}:$httpPort/$deviceUuid/</wsd:XAddrs>
-        <wsd:MetadataVersion>1</wsd:MetadataVersion>
-        </wsd:ProbeMatch>
-        </wsd:ProbeMatches>
-        </soap:Body>
-        </soap:Envelope>
-    """.trimIndent()
+    private fun buildProbeMatch(relatesToId: String): String =
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
+                "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\" xmlns:wsa=\"http://schemas.xmlsoap.org/ws/2004/08/addressing\" xmlns:wsd=\"http://schemas.xmlsoap.org/ws/2005/04/discovery\" xmlns:wsdp=\"http://schemas.xmlsoap.org/ws/2006/02/devprof\" xmlns:pub=\"http://schemas.microsoft.com/windows/pub/2005/07\">" +
+                "<soap:Header>" +
+                "<wsa:To>http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous</wsa:To>" +
+                "<wsa:Action>http://schemas.xmlsoap.org/ws/2005/04/discovery/ProbeMatches</wsa:Action>" +
+                "<wsa:MessageID>urn:uuid:${UUID.randomUUID()}</wsa:MessageID>" +
+                "<wsa:RelatesTo>$relatesToId</wsa:RelatesTo>" +
+                "<wsd:AppSequence InstanceId=\"$appInstanceId\" SequenceId=\"urn:uuid:${deviceUuid}\" MessageNumber=\"${++messageNumber}\"></wsd:AppSequence>" +
+                "</soap:Header>" +
+                "<soap:Body>" +
+                "<wsd:ProbeMatches>" +
+                "<wsd:ProbeMatch>" +
+                "<wsa:EndpointReference><wsa:Address>urn:uuid:$deviceUuid</wsa:Address></wsa:EndpointReference>" +
+                "<wsd:Types>wsdp:Device pub:Phone</wsd:Types>" +
+                "<wsd:XAddrs>http://${localIp()}:$httpPort/$deviceUuid/</wsd:XAddrs>" +
+                "<wsd:MetadataVersion>$metadataVersion</wsd:MetadataVersion>" +
+                "</wsd:ProbeMatch>" +
+                "</wsd:ProbeMatches>" +
+                "</soap:Body>" +
+                "</soap:Envelope>"
 
     // ---------- TCP unicast metadata Get/GetResponse ----------
 
@@ -203,7 +263,9 @@ class WSDiscoveryService(
             val server = ServerSocket(httpPort)
             httpServerSocket = server
             while (running.get()) {
-                val client = try { server.accept() } catch (e: Exception) {
+                val client = try {
+                    server.accept()
+                } catch (e: Exception) {
                     if (running.get()) Log.w(TAG, "HTTP accept error", e)
                     continue
                 }
@@ -246,10 +308,13 @@ class WSDiscoveryService(
 
             val response = buildGetResponse(relatesToId)
             val responseBytes = response.toByteArray(Charsets.UTF_8)
+            val dateHeader = java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME
+                .format(java.time.ZonedDateTime.now(java.time.ZoneOffset.UTC))
             val httpResponse = "HTTP/1.1 200 OK\r\n" +
                     "Content-Type: application/soap+xml\r\n" +
-                    "Content-Length: ${responseBytes.size}\r\n" +
-                    "Connection: close\r\n\r\n"
+                    "Server: NetworkShare-Discovery/0.9\r\n" +
+                    "Date: $dateHeader\r\n" +
+                    "Content-Length: ${responseBytes.size}\r\n\r\n"
             output.write(httpResponse.toByteArray(Charsets.UTF_8))
             output.write(responseBytes)
             output.flush()
@@ -258,50 +323,57 @@ class WSDiscoveryService(
 
     private fun logAvailableInterfaces() {
         NetworkInterface.getNetworkInterfaces().toList().forEach { ni ->
-            Log.d(TAG, "Interface: ${ni.name}, up=${ni.isUp}, loopback=${ni.isLoopback}, " +
-                    "multicast=${ni.supportsMulticast()}, addrs=${ni.inetAddresses.toList().map { it.hostAddress }}")
+            Log.d(
+                TAG, "Interface: ${ni.name}, up=${ni.isUp}, loopback=${ni.isLoopback}, " +
+                        "multicast=${ni.supportsMulticast()}, addrs=${
+                            ni.inetAddresses.toList().map { it.hostAddress }
+                        }"
+            )
         }
     }
 
-    private fun buildGetResponse(relatesToId: String): String = """
-        <?xml version="1.0" encoding="utf-8"?>
-        <soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope" xmlns:wsa="http://schemas.xmlsoap.org/ws/2004/08/addressing" xmlns:wsx="http://schemas.xmlsoap.org/ws/2004/09/mex" xmlns:wsdp="http://schemas.xmlsoap.org/ws/2006/02/devprof" xmlns:un0="http://schemas.microsoft.com/windows/pnpx/2005/10" xmlns:pub="http://schemas.microsoft.com/windows/pub/2005/07">
-        <soap:Header>
-        <wsa:To>http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous</wsa:To>
-        <wsa:Action>http://schemas.xmlsoap.org/ws/2004/09/transfer/GetResponse</wsa:Action>
-        <wsa:MessageID>urn:uuid:${UUID.randomUUID()}</wsa:MessageID>
-        <wsa:RelatesTo>$relatesToId</wsa:RelatesTo>
-        </soap:Header>
-        <soap:Body>
-        <wsx:Metadata>
-        <wsx:MetadataSection Dialect="http://schemas.xmlsoap.org/ws/2006/02/devprof/ThisDevice">
-        <wsdp:ThisDevice>
-        <wsdp:FriendlyName>$friendlyName</wsdp:FriendlyName>
-        <wsdp:FirmwareVersion>1.0</wsdp:FirmwareVersion>
-        <wsdp:SerialNumber>1</wsdp:SerialNumber>
-        </wsdp:ThisDevice>
-        </wsx:MetadataSection>
-        <wsx:MetadataSection Dialect="http://schemas.xmlsoap.org/ws/2006/02/devprof/ThisModel">
-        <wsdp:ThisModel>
-        <wsdp:Manufacturer>$manufacturer</wsdp:Manufacturer>
-        <wsdp:ModelName>$modelName</wsdp:ModelName>
-        <wsdp:ModelNumber>$modelNumber</wsdp:ModelNumber>
-        <wsdp:PresentationUrl>http://$friendlyName:8080</wsdp:PresentationUrl> <un0:DeviceCategory>Phones</un0:DeviceCategory>
-        </wsdp:ThisModel>
-        </wsx:MetadataSection>
-        <wsx:MetadataSection Dialect="http://schemas.xmlsoap.org/ws/2006/02/devprof/Relationship">
-        <wsdp:Relationship Type="http://schemas.xmlsoap.org/ws/2006/02/devprof/host">
-        <wsdp:Host>
-        <wsa:EndpointReference><wsa:Address>urn:uuid:$deviceUuid</wsa:Address></wsa:EndpointReference>
-        <wsdp:Types>wsdp:Device</wsdp:Types>
-        <wsdp:ServiceId>urn:uuid:$deviceUuid</wsdp:ServiceId>
-        </wsdp:Host>
-        </wsdp:Relationship>
-        </wsx:MetadataSection>
-        </wsx:Metadata>
-        </soap:Body>
-        </soap:Envelope>
-    """.trimIndent()
+    private fun buildGetResponse(relatesToId: String): String =
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
+                "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\" xmlns:wsa=\"http://schemas.xmlsoap.org/ws/2004/08/addressing\" xmlns:wsx=\"http://schemas.xmlsoap.org/ws/2004/09/mex\" xmlns:wsdp=\"http://schemas.xmlsoap.org/ws/2006/02/devprof\" xmlns:un0=\"http://schemas.microsoft.com/windows/pnpx/2005/10\" xmlns:pub=\"http://schemas.microsoft.com/windows/pub/2005/07\">" +
+                "<soap:Header>" +
+                "<wsa:To>http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous</wsa:To>" +
+                "<wsa:Action>http://schemas.xmlsoap.org/ws/2004/09/transfer/GetResponse</wsa:Action>" +
+                "<wsa:MessageID>urn:uuid:${UUID.randomUUID()}</wsa:MessageID>" +
+                "<wsa:RelatesTo>$relatesToId</wsa:RelatesTo>" +
+                "</soap:Header>" +
+                "<soap:Body>" +
+                "<wsx:Metadata>" +
+                "<wsx:MetadataSection Dialect=\"http://schemas.xmlsoap.org/ws/2006/02/devprof/ThisDevice\">" +
+                "<wsdp:ThisDevice>" +
+                "<wsdp:FriendlyName>$friendlyName</wsdp:FriendlyName>" +
+                "<wsdp:FirmwareVersion>1.0</wsdp:FirmwareVersion>" +
+                "<wsdp:SerialNumber>20260708</wsdp:SerialNumber>" +
+                "</wsdp:ThisDevice>" +
+                "</wsx:MetadataSection>" +
+                "<wsx:MetadataSection Dialect=\"http://schemas.xmlsoap.org/ws/2006/02/devprof/ThisModel\">" +
+                "<wsdp:ThisModel>" +
+                "<wsdp:Manufacturer>Daniel Eze</wsdp:Manufacturer>" +
+                "<wsdp:ManufacturerUrl>https://github.com/danielezeobinna</wsdp:ManufacturerUrl>" +
+                "<wsdp:ModelName>NetworkShare Discovery</wsdp:ModelName>" +
+                "<wsdp:ModelNumber>0.9</wsdp:ModelNumber>" +
+                "<wsdp:ModelUrl>github.com/danielezeobinna/NetworkShare</wsdp:ModelUrl>" +
+                "<wsdp:PresentationUrl>http://$friendlyName:8080</wsdp:PresentationUrl>" +
+                "<un0:DeviceCategory>Phones</un0:DeviceCategory>" +
+                "</wsdp:ThisModel>" +
+                "</wsx:MetadataSection>" +
+                "<wsx:MetadataSection Dialect=\"http://schemas.xmlsoap.org/ws/2006/02/devprof/Relationship\">" +
+                "<wsdp:Relationship Type=\"http://schemas.xmlsoap.org/ws/2006/02/devprof/host\">" +
+                "<wsdp:Host>" +
+                "<wsa:EndpointReference><wsa:Address>urn:uuid:$deviceUuid</wsa:Address></wsa:EndpointReference>" +
+                "<wsdp:Types>pub:Phone</wsdp:Types>" +
+                "<wsdp:ServiceId>urn:uuid:$deviceUuid</wsdp:ServiceId>" +
+                "<pub:Phone>$friendlyName/Workgroup:WORKGROUP</pub:Phone>" +
+                "</wsdp:Host>" +
+                "</wsdp:Relationship>" +
+                "</wsx:MetadataSection>" +
+                "</wsx:Metadata>" +
+                "</soap:Body>" +
+                "</soap:Envelope>"
 
     private fun runLlmnrListener() {
         try {
@@ -314,7 +386,9 @@ class WSDiscoveryService(
             val buf = ByteArray(512)
             while (running.get()) {
                 val packet = DatagramPacket(buf, buf.size)
-                try { socket.receive(packet) } catch (e: Exception) {
+                try {
+                    socket.receive(packet)
+                } catch (e: Exception) {
                     if (running.get()) Log.w(TAG, "LLMNR receive error", e)
                     continue
                 }
@@ -324,9 +398,11 @@ class WSDiscoveryService(
                 if ((flags and 0x8000) != 0) continue // skip responses
                 val txId = ((data[0].toInt() and 0xFF) shl 8) or (data[1].toInt() and 0xFF)
                 val name = parseName(data)
-                val qTypeOffset = 12 + name.split(".").filter { it.isNotEmpty() }.sumOf { it.length + 1 } + 1
+                val qTypeOffset =
+                    12 + name.split(".").filter { it.isNotEmpty() }.sumOf { it.length + 1 } + 1
                 if (qTypeOffset + 1 >= data.size) continue
-                val qType = ((data[qTypeOffset].toInt() and 0xFF) shl 8) or (data[qTypeOffset + 1].toInt() and 0xFF)
+                val qType =
+                    ((data[qTypeOffset].toInt() and 0xFF) shl 8) or (data[qTypeOffset + 1].toInt() and 0xFF)
                 if (qType != 1) continue // only respond to A queries
                 Log.d(TAG, "LLMNR query for: $name")
                 if (name.equals(friendlyName, ignoreCase = true)) {
@@ -337,10 +413,19 @@ class WSDiscoveryService(
                             reuseAddress = true
                             bind(InetSocketAddress(5355))
                         }.use {
-                            it.send(DatagramPacket(response, response.size, packet.address, packet.port))
+                            it.send(
+                                DatagramPacket(
+                                    response,
+                                    response.size,
+                                    packet.address,
+                                    packet.port
+                                )
+                            )
                         }
                         Log.d(TAG, "Sent LLMNR response for $name to ${packet.address}")
-                    } catch (e: Exception) { Log.w(TAG, "LLMNR send failed", e) }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "LLMNR send failed", e)
+                    }
                 }
             }
             try {
@@ -349,7 +434,9 @@ class WSDiscoveryService(
             } catch (_: Exception) {
                 // already closed by stop(), that's fine
             }
-        } catch (e: Exception) { Log.e(TAG, "LLMNR listener failed", e) }
+        } catch (e: Exception) {
+            Log.e(TAG, "LLMNR listener failed", e)
+        }
     }
 
     private fun runMdnsListener() {
@@ -364,7 +451,9 @@ class WSDiscoveryService(
             val buf = ByteArray(512)
             while (running.get()) {
                 val packet = DatagramPacket(buf, buf.size)
-                try { socket.receive(packet) } catch (e: Exception) {
+                try {
+                    socket.receive(packet)
+                } catch (e: Exception) {
                     if (running.get()) Log.w(TAG, "mDNS receive error", e)
                     continue
                 }
@@ -380,11 +469,18 @@ class WSDiscoveryService(
                     try {
                         socket.send(DatagramPacket(response, response.size, group, 5353))
                         Log.d(TAG, "Sent mDNS response for $name")
-                    } catch (e: Exception) { Log.w(TAG, "mDNS send failed", e) }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "mDNS send failed", e)
+                    }
                 }
             }
-            try { socket.leaveGroup(InetSocketAddress(group, 5353), findInterface()); socket.close() } catch (_: Exception) {}
-        } catch (e: Exception) { Log.e(TAG, "mDNS listener failed", e) }
+            try {
+                socket.leaveGroup(InetSocketAddress(group, 5353), findInterface()); socket.close()
+            } catch (_: Exception) {
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "mDNS listener failed", e)
+        }
     }
 
     private fun parseName(data: ByteArray): String {
@@ -523,7 +619,9 @@ class WSDiscoveryService(
             val buf = ByteArray(1024)
             while (running.get()) {
                 val packet = DatagramPacket(buf, buf.size)
-                try { socket.receive(packet) } catch (e: Exception) {
+                try {
+                    socket.receive(packet)
+                } catch (e: Exception) {
                     if (running.get()) Log.w(TAG, "SSDP M-SEARCH receive error", e)
                     continue
                 }
@@ -542,9 +640,19 @@ class WSDiscoveryService(
                             reuseAddress = true
                             bind(InetSocketAddress(1900))
                         }.use { sendSocket ->
-                            sendSocket.send(DatagramPacket(response, response.size, packet.address, packet.port))
+                            sendSocket.send(
+                                DatagramPacket(
+                                    response,
+                                    response.size,
+                                    packet.address,
+                                    packet.port
+                                )
+                            )
                         }
-                        Log.d(TAG, "Sent SSDP response from port 1900 to ${packet.address}:${packet.port}")
+                        Log.d(
+                            TAG,
+                            "Sent SSDP response from port 1900 to ${packet.address}:${packet.port}"
+                        )
                     } catch (e: Exception) {
                         Log.w(TAG, "SSDP response send failed: ${e.message}")
                     }
