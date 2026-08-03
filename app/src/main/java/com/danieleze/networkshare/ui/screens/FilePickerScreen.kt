@@ -1,6 +1,5 @@
 package com.danieleze.networkshare.ui.screens
 
-import android.content.Intent
 import android.widget.Toast
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -53,8 +52,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.danieleze.networkshare.WebDAVService
-import com.danieleze.networkshare.FileManager
 import com.danieleze.networkshare.FolderItem
 import com.danieleze.networkshare.R
 import com.danieleze.networkshare.draggableScrollbar
@@ -66,31 +63,32 @@ import java.io.File
 @Composable
 fun FilePickerSection(
     onBack: () -> Unit,
-    currentPath: MutableState<File?>
+    onClearItems: () -> Unit,
+    currentPath: MutableState<File?>,
+    items: List<FolderItem>,
+    isLoading: Boolean,
+    availableStorages: List<File>,
+    selectedPaths: List<String>,
+    onFolderScanRequest: (File?) -> Unit,
+    onRefreshServer: () -> Unit,
+    onToggleSelection: (String) -> Unit,
 ) {
     val context = LocalContext.current
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-
     var currentPath by currentPath
     var isExiting by remember { mutableStateOf(false) }
 
     val handleBack = {
         scope.launch {
             if (currentPath == null) {
-                if (WebDAVService.isRunning) {
-                    context.startService(Intent(context, WebDAVService::class.java).apply {
-                        action = "REFRESH_INFO"
-                    })
-                }
+                onRefreshServer()
                 onBack()
             } else {
                 isExiting = true; delay(220); isExiting = false
-                val storages = FileManager.getAvailableStorages(context)
                 currentPath =
-                    if (storages.any { it.absolutePath == currentPath?.absolutePath }) null
+                    if (availableStorages.any { it.absolutePath == currentPath?.absolutePath }) null
                     else currentPath?.parentFile
-                FileManager.scannedItems.clear()
             }
         }
     }
@@ -98,24 +96,14 @@ fun FilePickerSection(
     val pathParts = remember(currentPath) {
         val parts = mutableListOf<File>()
         var temp = currentPath
-        while (temp != null) {
-            parts.add(0, temp); temp = temp.parentFile
-        }
+        while (temp != null) { parts.add(0, temp); temp = temp.parentFile }
         parts
     }
 
-    val itemsToShow = FileManager.scannedItems.sortedBy { it.name.lowercase() }
-    val isLoading = FileManager.isScanning.value
+    val itemsToShow = items.sortedBy { it.name.lowercase() }
 
     LaunchedEffect(currentPath) {
-        if (currentPath == null) {
-            FileManager.scannedItems.clear()
-            FileManager.scannedItems.addAll(
-                FileManager.getAvailableStorages(context).map { FolderItem(it, it.name, true) }
-            )
-        } else {
-            FileManager.requestFolderScan(currentPath)
-        }
+        onFolderScanRequest(currentPath)
     }
 
     androidx.activity.compose.BackHandler(enabled = true) { handleBack() }
@@ -168,7 +156,7 @@ fun FilePickerSection(
                                         scope.launch {
                                             isExiting = true; delay(220); isExiting =
                                             false; currentPath =
-                                            null; FileManager.scannedItems.clear()
+                                            null; onClearItems()
                                         }
                                     }
                                 }
@@ -205,7 +193,7 @@ fun FilePickerSection(
                                             scope.launch {
                                                 isExiting = true; delay(220); isExiting =
                                                 false; currentPath =
-                                                file; FileManager.scannedItems.clear()
+                                                file; onClearItems()
                                             }
                                         }
                                     )
@@ -244,23 +232,33 @@ fun FilePickerSection(
                             StorageRow(
                                 name = label,
                                 path = if (isStorageRoot) folderItem.file.absolutePath else "Folder",
-                                fullPath = folderItem.file.absolutePath,
                                 isExiting = isExiting,
                                 isLast = isLast,
+                                isChecked = selectedPaths.contains(folderItem.file.absolutePath),
+                                isInherited = selectedPaths.any { shared ->
+                                    folderItem.file.absolutePath.startsWith("$shared/") &&
+                                            folderItem.file.absolutePath != shared
+                                },
+                                isPartiallyChecked = !selectedPaths.contains(folderItem.file.absolutePath) &&
+                                        !selectedPaths.any { shared ->
+                                            folderItem.file.absolutePath.startsWith("$shared/") &&
+                                                    folderItem.file.absolutePath != shared
+                                        } &&
+                                        selectedPaths.any { shared ->
+                                            shared.startsWith("${folderItem.file.absolutePath}/") &&
+                                                    shared != folderItem.file.absolutePath
+                                        },
                                 onClick = {
                                     if (folderItem.hasSubFolders || isStorageRoot) {
                                         scope.launch {
-                                            isExiting = true; delay(220); isExiting =
-                                            false; currentPath = folderItem.file
+                                            isExiting = true; delay(220); isExiting = false
+                                            currentPath = folderItem.file
                                         }
                                     } else {
-                                        Toast.makeText(
-                                            context,
-                                            "No sub-folders inside",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
+                                        Toast.makeText(context, "No sub-folders inside", Toast.LENGTH_SHORT).show()
                                     }
-                                }
+                                },
+                                onToggleSelection = { onToggleSelection(folderItem.file.absolutePath) }
                             )
                         }
                     }
@@ -302,29 +300,20 @@ fun FilePickerSection(
 fun StorageRow(
     name: String,
     path: String,
-    fullPath: String,
     isLast: Boolean = false,
     isExiting: Boolean = false,
     index: Int = 0,
-    onClick: () -> Unit
+    isChecked: Boolean,
+    isInherited: Boolean,
+    isPartiallyChecked: Boolean,
+    onClick: () -> Unit,
+    onToggleSelection: () -> Unit,
 ) {
     val isDark = LocalDarkTheme.current
-    val context = LocalContext.current
-    val isChecked = remember(fullPath, FileManager.selectedPaths.size) {
-        FileManager.selectedPaths.contains(fullPath)
-    }
-    val isInherited = remember(fullPath, FileManager.selectedPaths.size) {
-        FileManager.selectedPaths.any { shared -> fullPath.startsWith("$shared/") && fullPath != shared }
-    }
+
     val inheritedColor = if (isDark) Color.Gray else Color.LightGray
     val inheritedCheck = if (isDark) Color.LightGray else Color.White
-    val isPartiallyChecked = remember(fullPath, FileManager.selectedPaths.size) {
-        !isChecked && !isInherited && FileManager.selectedPaths.any { shared ->
-            shared.startsWith(
-                "$fullPath/"
-            ) && shared != fullPath
-        }
-    }
+
 
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(index * 40L); visible = true }
@@ -396,15 +385,7 @@ fun StorageRow(
                 )
                 .clickable {
                     if (!isInherited) {
-                        FileManager.toggleSelection(fullPath)
-                        WebDAVService.savePaths(context)
-                        if (WebDAVService.isRunning) {
-                            context.startService(
-                                Intent(
-                                    context,
-                                    WebDAVService::class.java
-                                ).apply { action = "REFRESH_INFO" })
-                        }
+                        onToggleSelection()
                     }
                 }
         ) {

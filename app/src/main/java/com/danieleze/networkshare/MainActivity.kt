@@ -129,7 +129,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 
         viewModel.isPending = false
         viewModel.isDiscoveryOn = viewModel.isServiceRunning()
-        WebDAVService.loadPaths(this.applicationContext)
+        viewModel.loadStorageRoots(this.applicationContext)
 
         if (savedInstanceState == null) {
             handleIncomingShare(intent)
@@ -193,7 +193,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                     Column(modifier = Modifier.fillMaxSize()) {
                                         Box(modifier = Modifier.weight(1f)) {
                                             val pendingTrustSsid =
-                                                WebDAVService.pendingTrustSsid.value
+                                                viewModel.pendingTrustSsid
 
                                             LaunchedEffect(pendingTrustSsid) {
                                                 if (pendingTrustSsid != null && viewModel.isDiscoveryOn)
@@ -213,7 +213,28 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                                 show = viewModel.showUnknownNetworkDialog,
                                                 ssid = pendingTrustSsid,
                                                 appTheme = viewModel.appTheme,
-                                                onDismiss = { viewModel.showUnknownNetworkDialog = false }
+                                                onDismiss = { viewModel.showUnknownNetworkDialog = false },
+                                                onAllow = {
+                                                    viewModel.allowNetwork(this@MainActivity, pendingTrustSsid!!)
+                                                    viewModel.clearPendingTrustSsid()
+                                                    startService(Intent(this@MainActivity, WebDAVService::class.java).apply {
+                                                        action = "RESTORE_NOTIFICATION"
+                                                    })
+                                                },
+                                                onAllowOnce = {
+                                                    viewModel.allowNetworkOnce(pendingTrustSsid!!)
+                                                    viewModel.clearPendingTrustSsid()
+                                                    startService(Intent(this@MainActivity, WebDAVService::class.java).apply {
+                                                        action = "RESTORE_NOTIFICATION"
+                                                    })
+                                                },
+                                                onBlock = {
+                                                    viewModel.blockNetwork(this@MainActivity, pendingTrustSsid!!)
+                                                    viewModel.clearPendingTrustSsid()
+                                                    startService(Intent(this@MainActivity, WebDAVService::class.java).apply {
+                                                        action = "RESTORE_NOTIFICATION"
+                                                    })
+                                                }
                                             )
                                             NotificationPermissionDialog(
                                                 show = viewModel.showNotificationDialog,
@@ -227,7 +248,20 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                             NoNetworkDialog(
                                                 show = viewModel.showNetworkDialog,
                                                 appTheme = viewModel.appTheme,
-                                                onDismiss = { viewModel.showNetworkDialog = false }
+                                                onDismiss = { viewModel.showNetworkDialog = false },
+                                                onHotspot = {
+                                                    viewModel.isWaitingForHotspot = true
+                                                    val i = Intent("android.settings.TETHER_SETTINGS").apply {
+                                                        addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY)
+                                                    }
+                                                    try {
+                                                        startActivity(i)
+                                                    } catch (_: Exception) {
+                                                        startActivity(Intent(Settings.ACTION_WIRELESS_SETTINGS).apply {
+                                                            addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY)
+                                                        })
+                                                    }
+                                                }
                                             )
 
                                             val screenState = when {
@@ -258,36 +292,18 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 
                                                     "allowedNetworks" -> NetworkListScreen(
                                                         title = "Allowed Networks",
-                                                        networks = NetworkManager.allowedNetworks,
+                                                        networks = viewModel.allowedNetworks,
                                                         iconRes = R.drawable.ic_wifi,
-                                                        onRemove = { ssid ->
-                                                            NetworkManager.remove(
-                                                                this@MainActivity,
-                                                                ssid
-                                                            )
-                                                        },
-                                                        onBack = {
-                                                            navigatingForward =
-                                                                false; showAllowedNetworks.value =
-                                                            false
-                                                        }
+                                                        onRemove = { ssid -> viewModel.removeNetwork(this@MainActivity, ssid) },
+                                                        onBack = { navigatingForward = false; showAllowedNetworks.value = false }
                                                     )
 
                                                     "blockedNetworks" -> NetworkListScreen(
                                                         title = "Blocked Networks",
-                                                        networks = NetworkManager.blockedNetworks,
+                                                        networks = viewModel.blockedNetworks,
                                                         iconRes = R.drawable.ic_wifi,
-                                                        onRemove = { ssid ->
-                                                            NetworkManager.remove(
-                                                                this@MainActivity,
-                                                                ssid
-                                                            )
-                                                        },
-                                                        onBack = {
-                                                            navigatingForward =
-                                                                false; showBlockedNetworks.value =
-                                                            false
-                                                        }
+                                                        onRemove = { ssid -> viewModel.removeNetwork(this@MainActivity, ssid) },
+                                                        onBack = { navigatingForward = false; showBlockedNetworks.value = false }
                                                     )
 
                                                     "discovery" -> DiscoveryScreen(
@@ -331,14 +347,54 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                                         currentTheme = viewModel.appTheme,
                                                         onThemeChange = { theme -> viewModel.saveTheme(theme) },
                                                         isDark = darkTheme,
+                                                        networkState = viewModel.networkState,
+                                                        isAuthEnabled = viewModel.isAuthEnabled,
+                                                        username = viewModel.username,
+                                                        password = viewModel.password,
+                                                        noPaths = viewModel.selectedPaths.isEmpty(),
+                                                        onAuthToggle = { enabled ->
+                                                            viewModel.setAuthEnabled(enabled, this@MainActivity)
+                                                            if (!enabled) handleToggle(false)
+                                                        },
+                                                        onUsernameChange = { viewModel.setUsername(it) },
+                                                        onPasswordChange = { viewModel.setPassword(it) },
+                                                        onSaveCredentials = { viewModel.saveCredentials(this@MainActivity) },
                                                     )
 
                                                     else -> FilePickerSection(
-                                                        onBack = {
-                                                            navigatingForward =
-                                                                false; isPickerOpen.value = false
+                                                        onBack = { navigatingForward = false; isPickerOpen.value = false },
+                                                        currentPath = currentPickerPath,
+                                                        items = viewModel.scannedItems,
+                                                        selectedPaths = viewModel.selectedPaths,
+                                                        isLoading = viewModel.isScanning,
+                                                        availableStorages = viewModel.getAvailableStorages(this@MainActivity),
+                                                        onFolderScanRequest = { path ->
+                                                            if (path == null) {
+                                                                viewModel.clearScannedItems()
+                                                                viewModel.scannedItems.addAll(
+                                                                    viewModel.getAvailableStorages(this@MainActivity)
+                                                                        .map { FolderItem(it, it.name, true) }
+                                                                )
+                                                            } else {
+                                                                viewModel.requestFolderScan(path)
+                                                            }
                                                         },
-                                                        currentPath = currentPickerPath
+                                                        onRefreshServer = {
+                                                            if (viewModel.isServiceRunning()) {
+                                                                startService(Intent(this@MainActivity, WebDAVService::class.java).apply {
+                                                                    action = "REFRESH_INFO"
+                                                                })
+                                                            }
+                                                        },
+                                                        onToggleSelection = { path ->
+                                                            viewModel.togglePathSelection(path, this@MainActivity)
+                                                            if (viewModel.isServiceRunning()) {
+                                                                startService(Intent(this@MainActivity, WebDAVService::class.java).apply {
+                                                                    action = "REFRESH_INFO"
+                                                                })
+                                                            }
+                                                        },
+                                                        onClearItems = { viewModel.clearScannedItems() },
                                                     )
                                                 }
                                             }
@@ -424,13 +480,13 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         if (isShowingAd) {
             isShowingAd = false
             refreshServiceIfRunning()
-            val pending = WebDAVService.pendingTrustSsid.value
+            val pending = viewModel.pendingTrustSsid
             if (pending != null && viewModel.isDiscoveryOn) viewModel.showUnknownNetworkDialog = true
             return
         }
 
         refreshServiceIfRunning()
-        val pending = WebDAVService.pendingTrustSsid.value
+        val pending = viewModel.pendingTrustSsid
         if (pending != null && viewModel.isDiscoveryOn) viewModel.showUnknownNetworkDialog = true
     }
 
@@ -738,11 +794,8 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
             contentResolver.openInputStream(uri)?.use { it.copyTo(destFile.outputStream()) }
 
             val path = networkShareDir.absolutePath
-            if (!FileManager.selectedPaths.contains(path)) {
-                FileManager.selectedPaths.add(path)
-                WebDAVService.savePaths(this)
-            }
-            FileManager.tempPriorityPath = path
+            viewModel.addSelectedPath(path, this)
+            viewModel.setTempPriorityPath(path)
 
             Toast.makeText(this, "Shared on NetworkShare", Toast.LENGTH_SHORT).show()
             startService(Intent(this, WebDAVService::class.java).apply { action = "REFRESH_INFO" })

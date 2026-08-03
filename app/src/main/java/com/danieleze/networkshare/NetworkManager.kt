@@ -63,14 +63,8 @@ object NetworkManager {
                 if (action == "android.net.wifi.WIFI_AP_STATE_CHANGED") {
                     val state = intent.getIntExtra("wifi_state", -1)
                     when (state) {
-                        13 -> {
-                            isHotspotActive = true
-                            eventListener?.onHotspotEnabled()
-                        }
-                        11, 14 -> {
-                            isHotspotActive = false
-                            verifyAndStop()
-                        }
+                        13 -> eventListener?.onHotspotEnabled()
+                        11, 14 -> verifyAndStop()
                     }
                 }
 
@@ -332,9 +326,17 @@ object NetworkManager {
         wifiJustEnabled: Boolean,
         onWifiJustEnabledConsumed: () -> Unit
     ) {
-        if (isHotspotActive) {
+        val isOnHotspot = try {
+            val wifiManager = context.applicationContext
+                .getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager
+            val method = wifiManager.javaClass.getDeclaredMethod("isWifiApEnabled")
+            method.isAccessible = true
+            method.invoke(wifiManager) as Boolean
+        } catch (_: Exception) { false }
+
+        if (isOnHotspot) {
             eventListener?.onNetworkTrustChanged(NetworkState.TRUSTED, "")
-            Log.d(TAG, "Hotspot active — trusted, regardless of any WiFi connection")
+            Log.d(TAG, "Hotspot active — always trusted")
             return
         }
 
@@ -365,6 +367,10 @@ object NetworkManager {
                     onWifiJustEnabledConsumed()
                 }
                 eventListener?.onNetworkTrustChanged(NetworkState.NO_NETWORK, ssid)
+            }
+
+            isHotspot(ssid) -> {
+                eventListener?.onNetworkTrustChanged(NetworkState.TRUSTED, ssid)
             }
 
             getTrust(ssid) == Trust.ALLOWED || getTrust(ssid) == Trust.ALLOW_ONCE -> {

@@ -64,8 +64,97 @@ class AppControl(application: Application) : androidx.lifecycle.AndroidViewModel
     }
 
     fun isServiceRunning() = WebDAVService.isRunning
-}
 
+
+    // ── WebDAVService helpers ─────────────────────────────────────────────────
+    val networkState get() = WebDAVService.networkState.value
+    val isAuthEnabled get() = WebDAVService.isAuthEnabled.value
+    val username get() = WebDAVService.username.value
+    val password get() = WebDAVService.password.value
+    val pendingTrustSsid get() = WebDAVService.pendingTrustSsid.value
+    var isWaitingForHotspot
+        get() = WebDAVService.isWaitingForHotspot
+        set(value) {
+            WebDAVService.isWaitingForHotspot = value
+        }
+
+    fun setAuthEnabled(enabled: Boolean, context: Context) {
+        WebDAVService.isAuthEnabled.value = enabled
+        WebDAVService.savePaths(context)
+    }
+
+    fun setUsername(value: String) {
+        WebDAVService.username.value = value
+    }
+
+    fun setPassword(value: String) {
+        WebDAVService.password.value = value
+    }
+
+    fun saveCredentials(context: Context) {
+        WebDAVService.savePaths(context)
+    }
+
+    fun clearPendingTrustSsid() {
+        WebDAVService.pendingTrustSsid.value = null
+    }
+
+    // ── FileManager helpers ───────────────────────────────────────────────────
+    val scannedItems get() = FileManager.scannedItems
+    val isScanning get() = FileManager.isScanning.value
+    val selectedPaths get() = FileManager.selectedPaths.toList()
+
+    fun getAvailableStorages(context: Context) =
+        FileManager.getAvailableStorages(context)
+
+    fun togglePathSelection(path: String, context: Context) {
+        FileManager.toggleSelection(path)
+        WebDAVService.savePaths(context)
+    }
+
+    fun requestFolderScan(path: File?) {
+        FileManager.requestFolderScan(path)
+    }
+
+    fun clearScannedItems() {
+        FileManager.scannedItems.clear()
+    }
+
+    fun loadStorageRoots(context: Context) {
+        WebDAVService.loadPaths(context)
+    }
+
+    // ── NetworkManager helpers ────────────────────────────────────────────────
+    val allowedNetworks get() = NetworkManager.allowedNetworks
+    val blockedNetworks get() = NetworkManager.blockedNetworks
+
+    fun allowNetwork(context: Context, ssid: String) {
+        NetworkManager.allow(context, ssid)
+    }
+
+    fun allowNetworkOnce(ssid: String) {
+        NetworkManager.allowOnce(ssid)
+    }
+
+    fun blockNetwork(context: Context, ssid: String) {
+        NetworkManager.block(context, ssid)
+    }
+
+    fun removeNetwork(context: Context, ssid: String) {
+        NetworkManager.remove(context, ssid)
+    }
+
+    fun addSelectedPath(path: String, context: Context) {
+        if (!FileManager.selectedPaths.contains(path)) {
+            FileManager.selectedPaths.add(path)
+            WebDAVService.savePaths(context)
+        }
+    }
+
+    fun setTempPriorityPath(path: String) {
+        FileManager.tempPriorityPath = path
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CopyFileAddressActivity — lightweight activity invoked by the share sheet

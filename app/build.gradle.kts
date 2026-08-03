@@ -53,7 +53,6 @@ android {
 }
 
 dependencies {
-    implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
     implementation("androidx.activity:activity-compose:1.9.0")
@@ -63,7 +62,7 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     implementation("androidx.fragment:fragment-ktx:1.8.5")
-    implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.core:core-ktx:1.17.0")
     implementation("org.nanohttpd:nanohttpd:2.3.1")
     implementation(libs.androidx.compose.foundation)
     implementation("androidx.biometric:biometric:1.2.0-alpha05")

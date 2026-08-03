@@ -34,10 +34,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import com.danieleze.networkshare.WebDAVService
-import com.danieleze.networkshare.MainActivity
-import com.danieleze.networkshare.AppControlService
-import com.danieleze.networkshare.NetworkManager
 import com.danieleze.networkshare.ui.theme.AppTheme
 
 @Composable
@@ -112,8 +108,15 @@ fun LocationOffDialog(
 }
 
 @Composable
-fun UnknownNetworkDialog(show: Boolean, ssid: String?, appTheme: AppTheme, onDismiss: () -> Unit) {
-    val context = LocalContext.current
+fun UnknownNetworkDialog(
+    show: Boolean,
+    ssid: String?,
+    appTheme: AppTheme,
+    onDismiss: () -> Unit,
+    onAllow: () -> Unit,
+    onAllowOnce: () -> Unit,
+    onBlock: () -> Unit,
+) {
     if (!show || ssid == null) return
     val isDark = when (appTheme) {
         AppTheme.LIGHT -> false; AppTheme.DARK -> true; AppTheme.SYSTEM -> isSystemInDarkTheme()
@@ -158,41 +161,16 @@ fun UnknownNetworkDialog(show: Boolean, ssid: String?, appTheme: AppTheme, onDis
                     )
                     Spacer(modifier = Modifier.height(24.dp))
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        TextButton(onClick = {
-                            NetworkManager.allow(
-                                context,
-                                ssid
-                            ); WebDAVService.pendingTrustSsid.value =
-                            null; context.startService(Intent(context, WebDAVService::class.java).apply { action = "RESTORE_NOTIFICATION" }); onDismiss()
-                        }, modifier = Modifier.fillMaxWidth()) {
-                            Text(
-                                "Allow",
-                                color = Color(0xFF2BAED5),
-                                fontSize = 16.sp
-                            )
+                        TextButton(onClick = { onAllow(); onDismiss() }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Allow", color = Color(0xFF2BAED5), fontSize = 16.sp)
                         }
-                        TextButton(onClick = {
-                            NetworkManager.allowOnce(ssid); WebDAVService.pendingTrustSsid.value =
-                            null; context.startService(Intent(context, WebDAVService::class.java).apply { action = "RESTORE_NOTIFICATION" }); onDismiss()
-                        }, modifier = Modifier.fillMaxWidth()) {
-                            Text(
-                                "Allow Once",
-                                color = Color(0xFF2BAED5),
-                                fontSize = 16.sp
-                            )
+
+                        TextButton(onClick = { onAllowOnce(); onDismiss() }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Allow Once", color = Color(0xFF2BAED5), fontSize = 16.sp)
                         }
-                        TextButton(onClick = {
-                            NetworkManager.block(
-                                context,
-                                ssid
-                            ); WebDAVService.pendingTrustSsid.value =
-                            null; context.startService(Intent(context, WebDAVService::class.java).apply { action = "RESTORE_NOTIFICATION" }); onDismiss()
-                        }, modifier = Modifier.fillMaxWidth()) {
-                            Text(
-                                "Block",
-                                color = Color(0xFF2BAED5),
-                                fontSize = 16.sp
-                            )
+
+                        TextButton(onClick = { onBlock(); onDismiss() }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Block", color = Color(0xFF2BAED5), fontSize = 16.sp)
                         }
                     }
                 }
@@ -202,7 +180,12 @@ fun UnknownNetworkDialog(show: Boolean, ssid: String?, appTheme: AppTheme, onDis
 }
 
 @Composable
-fun NoNetworkDialog(show: Boolean, appTheme: AppTheme, onDismiss: () -> Unit) {
+fun NoNetworkDialog(
+    show: Boolean,
+    appTheme: AppTheme,
+    onDismiss: () -> Unit,
+    onHotspot: () -> Unit,
+) {
     val context = LocalContext.current
     if (!show) return
     val isDark = when (appTheme) {
@@ -252,25 +235,8 @@ fun NoNetworkDialog(show: Boolean, appTheme: AppTheme, onDismiss: () -> Unit) {
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        TextButton(onClick = {
-                            onDismiss(); WebDAVService.isWaitingForHotspot = true
-                            val i =
-                                Intent("android.settings.TETHER_SETTINGS").apply { addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY) }
-                            try {
-                                context.startActivity(i)
-                            } catch (_: Exception) {
-                                context.startActivity(Intent(Settings.ACTION_WIRELESS_SETTINGS).apply {
-                                    addFlags(
-                                        Intent.FLAG_ACTIVITY_NO_HISTORY
-                                    )
-                                })
-                            }
-                        }, modifier = Modifier.weight(1f)) {
-                            Text(
-                                "Hotspot",
-                                color = Color(0xFF2BAED5),
-                                fontSize = 16.sp
-                            )
+                        TextButton(onClick = { onDismiss(); onHotspot() }, modifier = Modifier.weight(1f)) {
+                            Text("Hotspot", color = Color(0xFF2BAED5), fontSize = 16.sp)
                         }
                         VerticalDivider(
                             modifier = Modifier

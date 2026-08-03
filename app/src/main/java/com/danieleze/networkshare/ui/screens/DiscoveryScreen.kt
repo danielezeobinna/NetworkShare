@@ -70,7 +70,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
@@ -81,8 +80,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.danieleze.networkshare.WebDAVService
-import com.danieleze.networkshare.FileManager
 import com.danieleze.networkshare.NetworkState
 import com.danieleze.networkshare.R
 import com.danieleze.networkshare.draggableScrollbar
@@ -108,8 +105,16 @@ fun DiscoveryScreen(
     currentTheme: AppTheme,
     isDark: Boolean,
     onOpenUserGuide: () -> Unit,
+    networkState: NetworkState,
+    isAuthEnabled: Boolean,
+    username: String,
+    password: String,
+    noPaths: Boolean,
+    onAuthToggle: (Boolean) -> Unit,
+    onUsernameChange: (String) -> Unit,
+    onPasswordChange: (String) -> Unit,
+    onSaveCredentials: () -> Unit,
 ) {
-    val context = LocalContext.current
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     var isEditing by remember { mutableStateOf(false) }
@@ -117,7 +122,7 @@ fun DiscoveryScreen(
     val focusManager = LocalFocusManager.current
     val focusRequester = remember { FocusRequester() }
     val softwareKeyboardController = LocalSoftwareKeyboardController.current
-    val networkState = WebDAVService.networkState.value
+    val networkState = networkState
 
     var isRefreshing by remember { mutableStateOf(false) }
     val pullRefreshState = rememberPullToRefreshState()
@@ -125,8 +130,8 @@ fun DiscoveryScreen(
     var originalUsername by remember { mutableStateOf("") }
     var originalPassword by remember { mutableStateOf("") }
 
-    val hasChanged = WebDAVService.username.value != originalUsername ||
-            WebDAVService.password.value != originalPassword
+    val hasChanged = username != originalUsername ||
+            password != originalPassword
 
     var showMenu by remember { mutableStateOf(false) }
     var themeExpanded by remember { mutableStateOf(false) }
@@ -185,8 +190,8 @@ fun DiscoveryScreen(
                         .pointerInput(Unit) {
                             detectTapGestures(onTap = {
                                 if (isEditing) {
-                                    WebDAVService.username.value = originalUsername
-                                    WebDAVService.password.value = originalPassword
+                                    onUsernameChange(originalUsername)
+                                    onPasswordChange(originalPassword)
                                     isEditing = false
                                 }
                                 focusManager.clearFocus()
@@ -277,7 +282,7 @@ fun DiscoveryScreen(
                             MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                     ) {
                         val addressLines = addresses.split("\n").filter { it.isNotBlank() }
-                        val noPaths = FileManager.selectedPaths.isEmpty()
+                        val noPaths = noPaths
                         val displayLines = if (networkState != NetworkState.TRUSTED) {
                             val grouped = mutableListOf<String>()
                             var count = 0
@@ -422,11 +427,9 @@ fun DiscoveryScreen(
                                     )
                                 }
                                 Switch(
-                                    checked = WebDAVService.isAuthEnabled.value,
+                                    checked = isAuthEnabled,
                                     onCheckedChange = {
-                                        WebDAVService.isAuthEnabled.value = it
-                                        WebDAVService.savePaths(context)
-                                        if (!it) onToggle(false)
+                                        onAuthToggle(it)
                                     },
                                     enabled = true,
                                     colors = SwitchDefaults.colors(
@@ -443,7 +446,7 @@ fun DiscoveryScreen(
                             }
 
                             AnimatedVisibility(
-                                visible = WebDAVService.isAuthEnabled.value,
+                                visible = isAuthEnabled,
                                 enter = expandVertically() + fadeIn(),
                                 exit = shrinkVertically() + fadeOut()
                             ) {
@@ -458,13 +461,13 @@ fun DiscoveryScreen(
                                         TextButton(
                                             onClick = {
                                                 if (!isEditing) {
-                                                    originalUsername = WebDAVService.username.value
-                                                    originalPassword = WebDAVService.password.value
+                                                    originalUsername = username
+                                                    originalPassword = password
                                                     isEditing = true
                                                 } else {
                                                     isEditing = false
                                                     focusManager.clearFocus()
-                                                    WebDAVService.savePaths(context)
+                                                    onSaveCredentials()
                                                 }
                                             },
                                             contentPadding = PaddingValues(
@@ -515,15 +518,13 @@ fun DiscoveryScreen(
                                             modifier = Modifier.width(90.dp)
                                         )
                                         BasicTextField(
-                                            value = WebDAVService.username.value,
-                                            onValueChange = { WebDAVService.username.value = it },
+                                            value = username,
+                                            onValueChange = { onUsernameChange(it) },
                                             enabled = isEditing,
                                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                                             keyboardActions = KeyboardActions(onDone = {
                                                 isEditing =
-                                                    false; focusManager.clearFocus(); WebDAVService.savePaths(
-                                                context
-                                            )
+                                                    false; focusManager.clearFocus(); onSaveCredentials()
                                             }),
                                             textStyle = LocalTextStyle.current.copy(
                                                 fontSize = 16.sp,
@@ -560,15 +561,13 @@ fun DiscoveryScreen(
                                             modifier = Modifier.width(90.dp)
                                         )
                                         BasicTextField(
-                                            value = WebDAVService.password.value,
-                                            onValueChange = { WebDAVService.password.value = it },
+                                            value = password,
+                                            onValueChange = { onPasswordChange(it) },
                                             enabled = isEditing,
                                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                                             keyboardActions = KeyboardActions(onDone = {
                                                 isEditing =
-                                                    false; focusManager.clearFocus(); WebDAVService.savePaths(
-                                                context
-                                            )
+                                                    false; focusManager.clearFocus(); onSaveCredentials()
                                             }),
                                             textStyle = LocalTextStyle.current.copy(
                                                 fontSize = 16.sp,

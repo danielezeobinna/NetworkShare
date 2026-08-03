@@ -387,6 +387,9 @@ class WebDAVServer private constructor(
     }
 
     companion object {
+        private const val SERVER_NAME = "WebDAN"
+        private const val SERVER_VERSION = "0.9.0"
+        const val SERVER_HEADER_VALUE = "$SERVER_NAME/$SERVER_VERSION"
         fun startServer(
             context: Context,
             listener: TransferListener,
@@ -411,17 +414,18 @@ class WebDAVServer private constructor(
 
     override fun serve(session: IHTTPSession): Response {
         return try {
-            serveInternal(session)
+            serveInternal(session).apply {
+                addHeader("Server", SERVER_HEADER_VALUE)
+            }
         } catch (e: Exception) {
-            // Any unhandled exception (e.g. overwhelmed under concurrent load) returns
-            // 403 instead of 400. Windows treats 403 as retriable; 400 causes it to
-            // give up and show the misleading "file too large" error.
             Log.e(tag, "Unhandled error in serve(): ${e.message}", e)
             newFixedLengthResponse(
                 Response.Status.FORBIDDEN,
                 MIME_PLAINTEXT,
                 "Server busy, please retry."
-            )
+            ).apply {
+                addHeader("Server", SERVER_HEADER_VALUE)
+            }
         }
     }
 
@@ -570,7 +574,7 @@ class WebDAVServer private constructor(
     }
 
     private fun handlePut(session: IHTTPSession, target: File): Response {
-        val tempFile = File(target.parentFile, ".~${target.name}.${UUID.randomUUID()}.tmp")
+        val tempFile = File(uploadCacheDir, ".~${UUID.randomUUID()}.tmp")
         val sessionKey = "${session.remoteIpAddress}|${session.headers["user-agent"]}"
         val isReplace = target.exists() && target.length() > 0L
 
@@ -628,7 +632,7 @@ class WebDAVServer private constructor(
 
             if (tempFile.length() == contentLength || (contentLength == 0L && !isReplace)) {
                 if (target.exists()) target.delete()
-                if (tempFile.renameTo(target)) {
+                if (moveTempToTarget(tempFile, target)) {
                     if (isReplace) PersistenceGuard.clear(context, target.absolutePath)
                     newFixedLengthResponse(Response.Status.CREATED, MIME_PLAINTEXT, "")
                 } else {
@@ -989,19 +993,26 @@ class WebDAVServer private constructor(
         xml.append(getObjectPropertiesXml(target, session.uri))
 
         val depth = session.headers["depth"] ?: "1"
+        var nodeCount = 0
+        val maxNodes = 5000
 
-        if (target.isDirectory && depth != "0") {
-            target.listFiles()?.filter { child ->
-                !child.name.startsWith(".~") // hide in-progress temp files
-            }?.forEach { child ->
-                val childResult = config.getObjects("${session.uri.trimEnd('/')}/${child.name}")
-                val isVisible = childResult is File
-                if (isVisible) {
-                    val baseUri = session.uri.removeSuffix("/")
-                    val childUri = "$baseUri/${child.name}"
+        fun appendChildren(dir: File, baseUri: String, recursive: Boolean) {
+            dir.listFiles()?.filter { !it.name.startsWith(".~") }?.forEach { child ->
+                if (nodeCount >= maxNodes) return@forEach
+                val childUri = "${baseUri.trimEnd('/')}/${child.name}"
+                val childResult = config.getObjects(childUri)
+                if (childResult is File) {
                     xml.append(getObjectPropertiesXml(child, childUri))
+                    nodeCount++
+                    if (recursive && child.isDirectory) {
+                        appendChildren(child, childUri, true)
+                    }
                 }
             }
+        }
+
+        if (target.isDirectory && depth != "0") {
+            appendChildren(target, session.uri, depth == "infinity")
         }
 
         xml.append("</D:multistatus>")
@@ -1086,6 +1097,25 @@ class WebDAVServer private constructor(
     """.trimIndent()
     }
 
+    private val uploadCacheDir: File by lazy {
+        File(context.cacheDir, "webdav_uploads").apply { mkdirs() }
+    }
+
+    private fun moveTempToTarget(tempFile: File, target: File): Boolean {
+        if (tempFile.renameTo(target)) return true
+        // Temp file lives in app-private cache, target may be on a different
+        // volume (SD card) — rename() can't cross filesystems, so copy instead.
+        return try {
+            tempFile.inputStream().use { input ->
+                target.outputStream().use { output -> input.copyTo(output) }
+            }
+            tempFile.delete()
+            true
+        } catch (e: Exception) {
+            Log.w(tag, "Copy fallback failed moving temp file to ${target.name}: ${e.message}")
+            false
+        }
+    }
     // ── Lifecycle ────────────────────────────────────────────
 
     fun stopServer() {
