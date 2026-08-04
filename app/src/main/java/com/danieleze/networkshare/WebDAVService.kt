@@ -36,12 +36,17 @@ class WebDAVService : Service(), TransferListener,
     private val safetyChannelId = "WebDAV_Safety_Alerts"
     private val wsDiscoveryService = WSDiscoveryService(
         context = this,
-        friendlyName = Build.MODEL
+        friendlyName = getUsername()
     )
+    val friendlyServerAddress: String
+        get() {
+            val server = activeServers.firstOrNull() ?: return "http://0.0.0.0:8080"
+            return "${server.scheme}://${getUsername()}:${server.port}"
+        }
     // ── NetworkEventListener implementation ──────────────────
     // NetworkManager calls these when network state changes.
 
-    override fun getUsername() = username.value
+    override fun getUsername(): String = username.value
     override fun getPassword() = password.value
     override fun isAuthEnabled() = isAuthEnabled.value
     override fun getIpAddress(): String? = NetworkManager.getLocalIpAddress()
@@ -304,6 +309,7 @@ class WebDAVService : Service(), TransferListener,
         val server = WebDAVServer.startServer(this, this, this)
         if (server != null) {
             activeServers.add(server)
+            wsDiscoveryService.webdavAddress = friendlyServerAddress
             Log.d(tag, "Unified server started on port ${server.port}")
         } else {
             Log.e(tag, "Failed to start server after multiple attempts")
@@ -322,9 +328,8 @@ class WebDAVService : Service(), TransferListener,
 
     private fun broadcastCurrentAddresses() {
         val server = activeServers.firstOrNull()
-        val boundIp = server?.boundIp ?: "0.0.0.0"
-        val port = server?.port ?: 8080
-        val isValidNetwork = boundIp != "0.0.0.0"
+        val serverAddress = server?.serverAddress ?: "http://0.0.0.0:8080"
+        val isValidNetwork = (server?.boundIp ?: "0.0.0.0") != "0.0.0.0"
         val statusSummary = StringBuilder()
 
         data class AddressItem(
@@ -343,9 +348,9 @@ class WebDAVService : Service(), TransferListener,
                 val isRoot = path == rootPath
                 val relativePath = path.removePrefix(rootPath).trimStart('/')
                 val url = if (relativePath.isEmpty())
-                    "http://$boundIp:$port/$label"
+                    "$serverAddress/$label"
                 else
-                    "http://$boundIp:$port/$label/$relativePath"
+                    "$serverAddress/$label/$relativePath"
 
                 addressList.add(AddressItem(
                     label = label,

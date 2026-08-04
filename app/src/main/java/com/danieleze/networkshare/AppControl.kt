@@ -172,6 +172,7 @@ class CopyFileAddressActivity : Activity() {
         if (intent?.action != Intent.ACTION_SEND || intent.type == null) {
             toast("Unsupported share type"); return
         }
+
         val uri = androidx.core.content.IntentCompat.getParcelableExtra(
             intent, Intent.EXTRA_STREAM, android.net.Uri::class.java
         ) ?: run { toast("No file found in share"); return }

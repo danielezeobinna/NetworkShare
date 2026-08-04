@@ -454,6 +454,11 @@ fun DiscoveryScreen(
                                     Spacer(modifier = Modifier.height(4.dp))
 
                                     // Edit / Done / Close button
+                                    val isValidHostname = remember(username) {
+                                        username.isNotBlank() &&
+                                                username.length <= 63 &&
+                                                Regex("^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$").matches(username)
+                                    }
                                     Row(
                                         horizontalArrangement = Arrangement.End,
                                         modifier = Modifier.fillMaxWidth()
@@ -465,9 +470,12 @@ fun DiscoveryScreen(
                                                     originalPassword = password
                                                     isEditing = true
                                                 } else {
-                                                    isEditing = false
-                                                    focusManager.clearFocus()
-                                                    onSaveCredentials()
+                                                    if (isValidHostname) {
+                                                        isEditing = false
+                                                        focusManager.clearFocus()
+                                                        onSaveCredentials()
+                                                    }
+                                                    // invalid: do nothing — stay in editing mode, red warning stays visible
                                                 }
                                             },
                                             contentPadding = PaddingValues(
@@ -523,8 +531,11 @@ fun DiscoveryScreen(
                                             enabled = isEditing,
                                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                                             keyboardActions = KeyboardActions(onDone = {
-                                                isEditing =
-                                                    false; focusManager.clearFocus(); onSaveCredentials()
+                                                if (isValidHostname) {
+                                                    isEditing = false
+                                                    focusManager.clearFocus()
+                                                    onSaveCredentials()
+                                                }
                                             }),
                                             textStyle = LocalTextStyle.current.copy(
                                                 fontSize = 16.sp,
@@ -536,14 +547,23 @@ fun DiscoveryScreen(
                                                 .weight(1f)
                                                 .focusRequester(focusRequester)
                                         )
+                                        Spacer(modifier = Modifier.width(24.dp))
                                     }
                                     HorizontalDivider(
                                         modifier = Modifier
                                             .offset(y = 4.dp)
                                             .padding(start = 90.dp, end = 16.dp, top = 8.dp),
-                                        thickness = 0.5.dp,
-                                        color = Color.Gray.copy(alpha = 0.3f)
+                                        thickness = if (isValidHostname) 0.5.dp else 1.dp,
+                                        color = if (isValidHostname) Color.Gray.copy(alpha = 0.3f) else Color(0xFFE53935)
                                     )
+                                    if (!isValidHostname && username.isNotEmpty()) {
+                                        Text(
+                                            text = "No spaces or symbols allowed",
+                                            color = Color(0xFFE53935),
+                                            fontSize = 12.sp,
+                                            modifier = Modifier.padding(start = 90.dp, end = 16.dp, top = 4.dp)
+                                        )
+                                    }
 
                                     Spacer(modifier = Modifier.height(16.dp))
 
@@ -566,8 +586,11 @@ fun DiscoveryScreen(
                                             enabled = isEditing,
                                             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                                             keyboardActions = KeyboardActions(onDone = {
-                                                isEditing =
-                                                    false; focusManager.clearFocus(); onSaveCredentials()
+                                                if (isValidHostname) {
+                                                    isEditing = false
+                                                    focusManager.clearFocus()
+                                                    onSaveCredentials()
+                                                }
                                             }),
                                             textStyle = LocalTextStyle.current.copy(
                                                 fontSize = 16.sp,

@@ -379,6 +379,12 @@ class WebDAVServer private constructor(
     val boundIp: String = config.getIpAddress() ?: "0.0.0.0"
 ) : FastHTTPD(boundIp, port) {
 
+    var scheme: String = "http"
+        private set
+
+    val serverAddress: String
+        get() = "$scheme://$boundIp:$port"
+
     private var isShuttingDown = false
     private val tag = "WebDAVServer:$port"
 
@@ -393,7 +399,9 @@ class WebDAVServer private constructor(
         fun startServer(
             context: Context,
             listener: TransferListener,
-            config: WebDAVServerConfig
+            config: WebDAVServerConfig,
+            secure: Boolean = false,
+            onStarted: ((String) -> Unit)? = null
         ): WebDAVServer? {
             var candidatePort = config.getPort() ?: 8080
             repeat(50) {
@@ -401,6 +409,8 @@ class WebDAVServer private constructor(
                 try {
                     server.start(SOCKET_READ_TIMEOUT, false)
                     Log.d(server.tag, "Server started on port $candidatePort")
+                    server.scheme = if (secure) "https" else "http"
+                    onStarted?.invoke(server.serverAddress)
                     return server
                 } catch (_: IOException) {
                     candidatePort++

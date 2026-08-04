@@ -27,6 +27,7 @@ import java.net.MulticastSocket
 class WSDiscoveryService(
     private val context: android.content.Context,
     var friendlyName: String,
+    var webdavAddress: String = "http://0.0.0.0:8080",
     private val httpPort: Int = 5357
 ) {
     companion object {
@@ -357,7 +358,7 @@ class WSDiscoveryService(
                 "<wsdp:ModelName>NetworkShare Discovery</wsdp:ModelName>" +
                 "<wsdp:ModelNumber>0.9</wsdp:ModelNumber>" +
                 "<wsdp:ModelUrl>github.com/danielezeobinna/NetworkShare</wsdp:ModelUrl>" +
-                "<wsdp:PresentationUrl>http://$friendlyName:8080</wsdp:PresentationUrl>" +
+                "<wsdp:PresentationUrl>$webdavAddress</wsdp:PresentationUrl>" +
                 "<un0:DeviceCategory>Phones</un0:DeviceCategory>" +
                 "</wsdp:ThisModel>" +
                 "</wsx:MetadataSection>" +
