@@ -29,6 +29,7 @@ class AppControl(application: Application) : androidx.lifecycle.AndroidViewModel
     // ── State exposed to the UI ───────────────────────────────────────────────
     var isValidNetwork by mutableStateOf(true)
     var serverAddresses by mutableStateOf("")
+    var serverAddressesFallback by mutableStateOf("")
     var isDiscoveryOn by mutableStateOf(false)
     var isPending by mutableStateOf(false)
     var appTheme by mutableStateOf(AppTheme.SYSTEM)
@@ -50,12 +51,16 @@ class AppControl(application: Application) : androidx.lifecycle.AndroidViewModel
     private fun prefs() =
         getApplication<Application>().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-    fun saveAddresses(addresses: String) {
-        prefs().edit { putString("last_addresses", addresses) }
+    fun saveAddresses(addresses: String, fallback: String) {
+        prefs().edit {
+            putString("last_addresses", addresses)
+            putString("last_addresses_fallback", fallback)
+        }
     }
 
     fun loadAddresses() {
         serverAddresses = prefs().getString("last_addresses", "loading...") ?: ""
+        serverAddressesFallback = prefs().getString("last_addresses_fallback", "") ?: ""
     }
 
     fun saveTheme(theme: AppTheme) {
@@ -67,11 +72,11 @@ class AppControl(application: Application) : androidx.lifecycle.AndroidViewModel
 
 
     // ── WebDAVService helpers ─────────────────────────────────────────────────
-    val networkState get() = WebDAVService.networkState.value
-    val isAuthEnabled get() = WebDAVService.isAuthEnabled.value
-    val username get() = WebDAVService.username.value
-    val password get() = WebDAVService.password.value
-    val pendingTrustSsid get() = WebDAVService.pendingTrustSsid.value
+    val networkState: NetworkState get() = WebDAVService.networkState.value
+    val isAuthEnabled: Boolean get() = WebDAVService.isAuthEnabled.value
+    val username: String get() = WebDAVService.username.value
+    val password: String get() = WebDAVService.password.value
+    val pendingTrustSsid: String? get() = WebDAVService.pendingTrustSsid.value
     var isWaitingForHotspot
         get() = WebDAVService.isWaitingForHotspot
         set(value) {

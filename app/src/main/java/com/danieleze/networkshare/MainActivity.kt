@@ -107,11 +107,13 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 
                 "com.danieleze.networkshare.ADDRESSES_UPDATED" -> {
                     val data = intent.getStringExtra("address_list")
+                    val fallbackData = intent.getStringExtra("address_list_fallback")
                     val validNetwork = intent.getBooleanExtra("is_valid_network", true)
                     if (data != null) {
                         viewModel.serverAddresses = data
+                        viewModel.serverAddressesFallback = fallbackData ?: ""
                         viewModel.isValidNetwork = validNetwork
-                        viewModel.saveAddresses(data)
+                        viewModel.saveAddresses(data, fallbackData ?: "")
                     }
                 }
             }
@@ -310,6 +312,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                                         isOn = viewModel.isDiscoveryOn,
                                                         isPending = viewModel.isPending,
                                                         addresses = viewModel.serverAddresses,
+                                                        addressesFallback = viewModel.serverAddressesFallback,
                                                         onToggle = { start -> handleToggle(start) },
                                                         onReload = {
                                                             if (viewModel.isDiscoveryOn) {

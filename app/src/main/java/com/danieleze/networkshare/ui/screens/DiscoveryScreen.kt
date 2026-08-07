@@ -78,12 +78,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.danieleze.networkshare.NetworkState
 import com.danieleze.networkshare.R
 import com.danieleze.networkshare.draggableScrollbar
 import com.danieleze.networkshare.ui.theme.AppTheme
+import com.danieleze.networkshare.ui.theme.NetworkShareTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -94,6 +97,7 @@ fun DiscoveryScreen(
     isOn: Boolean,
     isPending: Boolean,
     addresses: String,
+    addressesFallback: String,
     onToggle: (Boolean) -> Unit,
     onReload: () -> Unit,
     onOpenPicker: () -> Unit,
@@ -126,6 +130,7 @@ fun DiscoveryScreen(
 
     var isRefreshing by remember { mutableStateOf(false) }
     val pullRefreshState = rememberPullToRefreshState()
+    var useFallbackAddress by remember { mutableStateOf(false) }
 
     var originalUsername by remember { mutableStateOf("") }
     var originalPassword by remember { mutableStateOf("") }
@@ -255,6 +260,7 @@ fun DiscoveryScreen(
                                 Text(
                                     text = "Choose Shared Paths...",
                                     fontSize = 16.sp,
+                                    fontWeight = FontWeight.Normal,
                                     color = Color(0xFF2BAED5)
                                 )
                             }
@@ -262,6 +268,8 @@ fun DiscoveryScreen(
                     }
 
                     // ── Address card ──────────────────────────────────────────────
+                    val interactionSource = remember { MutableInteractionSource() }
+
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "Shared Paths Addresses",
@@ -275,120 +283,140 @@ fun DiscoveryScreen(
                         shape = MaterialTheme.shapes.medium,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 156.dp),
+                            .heightIn(max = 142.dp),
                         color = if (isOn && networkState == NetworkState.TRUSTED)
                             MaterialTheme.colorScheme.surfaceVariant
                         else
                             MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
                     ) {
-                        val addressLines = addresses.split("\n").filter { it.isNotBlank() }
-                        val noPaths = noPaths
-                        val displayLines = if (networkState != NetworkState.TRUSTED) {
-                            val grouped = mutableListOf<String>()
-                            var count = 0
-                            for (line in addressLines) {
-                                if (count >= 2) break
-                                grouped.add(line)
-                                if (line.startsWith("http")) count++
-                            }
-                            grouped
-                        } else addressLines
-
-                        when {
-                            !isOn -> {
-                                onDismissNetworkDialog()
-                                Column(
-                                    modifier = Modifier
-                                        .padding(16.dp)
-                                        .graphicsLayer(alpha = 0.5f)
-                                ) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 0.dp),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                if (isOn && !noPaths && networkState == NetworkState.TRUSTED) {
                                     Text(
-                                        text = "NetworkShare is off.\nTurn on the switch to start sharing.",
-                                        fontFamily = FontFamily.Monospace,
-                                        fontSize = 14.sp,
-                                        color = Color.Gray
-                                    )
-                                }
-                            }
-
-                            noPaths -> {
-                                onDismissNetworkDialog()
-                                Column(
-                                    modifier = Modifier
-                                        .padding(16.dp)
-                                        .graphicsLayer(alpha = 0.5f)
-                                ) {
-                                    Text(
-                                        text = "No folders selected.\nGo to 'Choose Shared Paths' to start.",
-                                        fontFamily = FontFamily.Monospace,
-                                        fontSize = 14.sp,
-                                        color = Color.Gray
-                                    )
-                                }
-                            }
-
-                            isOn && networkState == NetworkState.NO_NETWORK -> {
-                                LaunchedEffect(Unit) { delay(2000L); onNoNetwork() }
-                                Column(
-                                    modifier = Modifier
-                                        .padding(16.dp)
-                                        .graphicsLayer(alpha = 0.5f)
-                                ) {
-                                    Text(
-                                        text = "No network detected.\nJoin a WiFi or create a Hotspot to start sharing.",
-                                        fontFamily = FontFamily.Monospace,
-                                        fontSize = 14.sp,
-                                        color = Color.Gray
-                                    )
-                                }
-                            }
-
-                            isOn && networkState == NetworkState.TRUSTED -> {
-                                onDismissNetworkDialog()
-                                SelectionContainer {
-                                    LazyColumn(
-                                        state = listState,
+                                        text = if (useFallbackAddress) "Use hostname instead?" else "Having trouble connecting?",
+                                        fontSize = 11.sp,
+                                        color = Color(0xFFFFA000),
+                                        textDecoration = TextDecoration.None,
                                         modifier = Modifier
-                                            .draggableScrollbar(listState, scope)
+                                            .offset(y = 3.dp)
+                                            .padding(end = 20.dp)
+                                            .clickable(
+                                                interactionSource = interactionSource,
+                                                indication = null
+                                            ) { useFallbackAddress = !useFallbackAddress }
+                                    )
+                                }
+                            }
+
+                            val addressLines = (if (useFallbackAddress) addressesFallback else addresses)
+                                .split("\n").filter { it.isNotBlank() }
+
+                            val displayLines = if (networkState != NetworkState.TRUSTED) {
+                                val grouped = mutableListOf<String>()
+                                var count = 0
+                                for (line in addressLines) {
+                                    if (count >= 2) break
+                                    grouped.add(line)
+                                    if (line.startsWith("http")) count++
+                                }
+                                grouped
+                            } else addressLines
+
+                            when {
+                                !isOn -> {
+                                    onDismissNetworkDialog()
+                                    Column(
+                                        modifier = Modifier
                                             .padding(16.dp)
+                                            .graphicsLayer(alpha = 0.5f)
                                     ) {
-                                        itemsIndexed(displayLines) { _, address ->
+                                        Text(
+                                            text = "NetworkShare is off.\nTurn on the switch to start sharing.",
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 14.sp,
+                                            color = Color.Gray
+                                        )
+                                    }
+                                }
+
+                                noPaths -> {
+                                    onDismissNetworkDialog()
+                                    Column(
+                                        modifier = Modifier
+                                            .padding(16.dp)
+                                            .graphicsLayer(alpha = 0.5f)
+                                    ) {
+                                        Text(
+                                            text = "No folders selected.\nGo to 'Choose Shared Paths' to start.",
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 14.sp,
+                                            color = Color.Gray
+                                        )
+                                    }
+                                }
+
+                                isOn && networkState == NetworkState.NO_NETWORK -> {
+                                    LaunchedEffect(Unit) { delay(2000L); onNoNetwork() }
+                                    Column(
+                                        modifier = Modifier
+                                            .padding(16.dp)
+                                            .graphicsLayer(alpha = 0.5f)
+                                    ) {
+                                        Text(
+                                            text = "No network detected.\nJoin a WiFi or create a Hotspot to start sharing.",
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 14.sp,
+                                            color = Color.Gray
+                                        )
+                                    }
+                                }
+
+                                isOn && networkState == NetworkState.TRUSTED -> {
+                                    onDismissNetworkDialog()
+                                    SelectionContainer {
+                                        LazyColumn(
+                                            state = listState,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .draggableScrollbar(listState, scope)
+                                                .padding(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 12.dp)
+                                        ) {
+                                            itemsIndexed(displayLines) { _, address ->
+                                                val isUrl = address.startsWith("http")
+                                                Text(
+                                                    text = address,
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontSize = 14.sp,
+                                                    color = if (isUrl) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                                                    modifier = Modifier.padding(bottom = if (isUrl) 12.dp else 2.dp, top = 0.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                else -> {
+                                    onDismissNetworkDialog()
+                                    Column(
+                                        modifier = Modifier
+                                            .padding(16.dp)
+                                            .graphicsLayer(alpha = 0.5f)
+                                    ) {
+                                        displayLines.forEach { address ->
                                             val isUrl = address.startsWith("http")
                                             Text(
                                                 text = address,
                                                 fontFamily = FontFamily.Monospace,
                                                 fontSize = 14.sp,
-                                                color = if (isUrl) MaterialTheme.colorScheme.primary
-                                                else MaterialTheme.colorScheme.onSurface,
-                                                modifier = Modifier.padding(
-                                                    bottom = if (isUrl) 16.dp else 2.dp,
-                                                    top = 2.dp
-                                                )
+                                                color = Color.Gray,
+                                                modifier = Modifier.padding(bottom = if (isUrl) 12.dp else 2.dp, top = 0.dp)
                                             )
                                         }
-                                    }
-                                }
-                            }
-
-                            else -> {
-                                onDismissNetworkDialog()
-                                Column(
-                                    modifier = Modifier
-                                        .padding(16.dp)
-                                        .graphicsLayer(alpha = 0.5f)
-                                ) {
-                                    displayLines.forEach { address ->
-                                        val isUrl = address.startsWith("http")
-                                        Text(
-                                            text = address,
-                                            fontFamily = FontFamily.Monospace,
-                                            fontSize = 14.sp,
-                                            color = Color.Gray,
-                                            modifier = Modifier.padding(
-                                                bottom = if (isUrl) 16.dp else 2.dp,
-                                                top = 2.dp
-                                            )
-                                        )
                                     }
                                 }
                             }
@@ -845,5 +873,38 @@ fun DiscoveryScreen(
                 }
             }
         }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun PreviewDiscoveryScreen() {
+    NetworkShareTheme {
+        DiscoveryScreen(
+            isOn = true,
+            isPending = false,
+            addresses = "Downloads:\nhttp://192.168.1.5:8080/Downloads\n\nPictures:\nhttp://192.168.1.5:8080/Pictures",
+            addressesFallback = "Downloads:\nhttp://pixel-6:8080/Downloads\n\nPictures:\nhttp://pixel-6:8080/Pictures",
+            onToggle = {},
+            onReload = {},
+            onOpenPicker = {},
+            onNoNetwork = {},
+            onDismissNetworkDialog = {},
+            onOpenAllowedNetworks = {},
+            onOpenBlockedNetworks = {},
+            onThemeChange = {},
+            currentTheme = AppTheme.SYSTEM,
+            isDark = false,
+            onOpenUserGuide = {},
+            networkState = NetworkState.TRUSTED,
+            isAuthEnabled = true,
+            username = "SM-M115F",
+            password = "password",
+            noPaths = false,
+            onAuthToggle = {},
+            onUsernameChange = {},
+            onPasswordChange = {},
+            onSaveCredentials = {}
+        )
     }
 }

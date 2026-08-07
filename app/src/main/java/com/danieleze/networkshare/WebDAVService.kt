@@ -41,7 +41,12 @@ class WebDAVService : Service(), TransferListener,
     val friendlyServerAddress: String
         get() {
             val server = activeServers.firstOrNull() ?: return "http://0.0.0.0:8080"
-            return "${server.scheme}://${getUsername()}:${server.port}"
+            val sanitizedHostname = getUsername()
+                .lowercase()
+                .filter { it.isLetterOrDigit() || it == '-' }
+                .trim('-')
+                .ifEmpty { "device" }
+            return "${server.scheme}://$sanitizedHostname:${server.port}"
         }
     // ── NetworkEventListener implementation ──────────────────
     // NetworkManager calls these when network state changes.
@@ -328,16 +333,14 @@ class WebDAVService : Service(), TransferListener,
 
     private fun broadcastCurrentAddresses() {
         val server = activeServers.firstOrNull()
-        val serverAddress = server?.serverAddress ?: "http://0.0.0.0:8080"
         val isValidNetwork = (server?.boundIp ?: "0.0.0.0") != "0.0.0.0"
-        val statusSummary = StringBuilder()
+        val friendlyBase = friendlyServerAddress
+        val ipBase = server?.serverAddress ?: "http://0.0.0.0:8080"
 
         data class AddressItem(
-            val label: String,
-            val folderName: String,
-            val url: String,
-            val isStorage: Boolean,
-            val isTempVip: Boolean
+            val label: String, val folderName: String,
+            val friendlyUrl: String, val ipUrl: String,
+            val isStorage: Boolean, val isTempVip: Boolean
         )
 
         val addressList = mutableListOf<AddressItem>()
@@ -347,15 +350,13 @@ class WebDAVService : Service(), TransferListener,
                 val folder = File(path)
                 val isRoot = path == rootPath
                 val relativePath = path.removePrefix(rootPath).trimStart('/')
-                val url = if (relativePath.isEmpty())
-                    "$serverAddress/$label"
-                else
-                    "$serverAddress/$label/$relativePath"
+                val suffix = if (relativePath.isEmpty()) "/$label" else "/$label/$relativePath"
 
                 addressList.add(AddressItem(
                     label = label,
                     folderName = folder.name,
-                    url = url,
+                    friendlyUrl = "$friendlyBase$suffix",
+                    ipUrl = "$ipBase$suffix",
                     isStorage = isRoot,
                     isTempVip = path == FileManager.tempPriorityPath
                 ))
@@ -368,13 +369,17 @@ class WebDAVService : Service(), TransferListener,
                 .thenBy { it.folderName.lowercase() }
         )
 
+        val friendlySummary = StringBuilder()
+        val ipSummary = StringBuilder()
         addressList.forEach { item ->
             val displayName = if (item.isStorage) item.label else item.folderName
-            statusSummary.append("$displayName:\n${item.url}\n\n")
+            friendlySummary.append("$displayName:\n${item.friendlyUrl}\n\n")
+            ipSummary.append("$displayName:\n${item.ipUrl}\n\n")
         }
 
         val intent = Intent("com.danieleze.networkshare.ADDRESSES_UPDATED")
-        intent.putExtra("address_list", statusSummary.toString().trim().ifEmpty { "No folders selected." })
+        intent.putExtra("address_list", friendlySummary.toString().trim().ifEmpty { "No folders selected." })
+        intent.putExtra("address_list_fallback", ipSummary.toString().trim().ifEmpty { "No folders selected." })
         intent.putExtra("is_valid_network", isValidNetwork)
         intent.setPackage(packageName)
         sendBroadcast(intent)
@@ -648,7 +653,7 @@ class WebDAVService : Service(), TransferListener,
         var isAuthEnabled = mutableStateOf(false)
         var isNetworkTrusted = mutableStateOf(false)
         var pendingTrustSsid = mutableStateOf<String?>(null)
-        var username = mutableStateOf("user")
+        var username = mutableStateOf(Build.MODEL)
         var password = mutableStateOf("pass")
 
         private val cancelledFiles = Collections.synchronizedSet(mutableSetOf<String>())
@@ -677,7 +682,7 @@ class WebDAVService : Service(), TransferListener,
         fun loadPaths(context: Context) {
             val prefs = context.getSharedPreferences("network_share_prefs", MODE_PRIVATE)
             isAuthEnabled.value = prefs.getBoolean("auth_enabled", true)
-            username.value = prefs.getString("username", "user") ?: "user"
+            username.value = prefs.getString("username", Build.MODEL) ?: Build.MODEL
             password.value = prefs.getString("password", "pass") ?: "pass"
             val saved = prefs.getStringSet("shared_paths", null)
             FileManager.selectedPaths.clear()
