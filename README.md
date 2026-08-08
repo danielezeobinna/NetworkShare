@@ -72,14 +72,14 @@ Connect your PC to your phone's hotspot, open File Explorer, type in the address
 
 Once sharing is turned on, the app shows you the server addresses. Use them like this:
 
-| Device | How to Connect |
-|---|---|
-| **Windows** | Open File Explorer → type the address in the address bar → enter your username and password |
-| **Mac** | Finder → Go → Connect to Server (`⌘K`) → paste the address |
-| **Linux** | File manager → Connect to Server → WebDAV |
-| **Android** | Use a WebDAV client like Cx File Explorer, Solid Explorer, or ES File Manager |
-| **iOS** | Files app → `...` → Connect to Server, or use a WebDAV app |
-| **Media Players** | VLC, Infuse, Kodi — open network stream with the address |
+| Device            | How to Connect                                                                              |
+|-------------------|---------------------------------------------------------------------------------------------|
+| **Windows**       | Open File Explorer → type the address in the address bar → enter your username and password |
+| **Mac**           | Finder → Go → Connect to Server (`⌘K`) → paste the address                                  |
+| **Linux**         | File manager → Connect to Server → WebDAV                                                   |
+| **Android**       | Use a WebDAV client like Cx File Explorer, Solid Explorer, or ES File Manager               |
+| **iOS**           | Files app → `...` → Connect to Server, or use a WebDAV app                                  |
+| **Media Players** | VLC, Infuse, Kodi — open network stream with the address                                    |
 
 ---
 
@@ -110,14 +110,14 @@ Once sharing is turned on, the app shows you the server addresses. Use them like
 
 ## Permissions
 
-| Permission | Why |
-|---|---|
-| `MANAGE_EXTERNAL_STORAGE` | Access files across all storage locations |
-| `FOREGROUND_SERVICE` | Keep the WebDAV server running while the app is in the background |
-| `ACCESS_WIFI_STATE` / `ACCESS_FINE_LOCATION` | Read the current Wi-Fi SSID for network trust evaluation |
-| `POST_NOTIFICATIONS` | Show server status and transfer progress notifications |
-| `WAKE_LOCK` | Prevent the CPU from sleeping during active file transfers |
-| `INTERNET` | Run the local WebDAV server (no external internet connection is made) |
+| Permission                                   | Why                                                                   |
+|----------------------------------------------|-----------------------------------------------------------------------|
+| `MANAGE_EXTERNAL_STORAGE`                    | Access files across all storage locations                             |
+| `FOREGROUND_SERVICE`                         | Keep the WebDAV server running while the app is in the background     |
+| `ACCESS_WIFI_STATE` / `ACCESS_FINE_LOCATION` | Read the current Wi-Fi SSID for network trust evaluation              |
+| `POST_NOTIFICATIONS`                         | Show server status and transfer progress notifications                |
+| `WAKE_LOCK`                                  | Prevent the CPU from sleeping during active file transfers            |
+| `INTERNET`                                   | Run the local WebDAV server (no external internet connection is made) |
 
 ---
 
@@ -140,6 +140,9 @@ MIT License — see [LICENSE](LICENSE) for details.
 ## Developer
 
 Built by **Daniel Eze**
+
+📧 **Email:** [danielezeobinna@yahoo.com](mailto:danielezeobinna@yahoo.com)  
+🌐 **Portfolio:** [danielezeobinna.github.io](https://danielezeobinna.github.io)
 
 ---
 
