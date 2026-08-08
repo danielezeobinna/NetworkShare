@@ -27,7 +27,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -84,7 +83,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.danieleze.networkshare.NetworkState
 import com.danieleze.networkshare.R
-import com.danieleze.networkshare.draggableScrollbar
+import com.danieleze.networkshare.ScrollableListWithDraggableScrollbar
 import com.danieleze.networkshare.ui.theme.AppTheme
 import com.danieleze.networkshare.ui.theme.NetworkShareTheme
 import kotlinx.coroutines.delay
@@ -121,6 +120,7 @@ fun DiscoveryScreen(
 ) {
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val interactionSource = remember { MutableInteractionSource() }
     var isEditing by remember { mutableStateOf(false) }
     var passwordVisible by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
@@ -268,7 +268,6 @@ fun DiscoveryScreen(
                     }
 
                     // ── Address card ──────────────────────────────────────────────
-                    val interactionSource = remember { MutableInteractionSource() }
 
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
@@ -379,11 +378,11 @@ fun DiscoveryScreen(
                                 isOn && networkState == NetworkState.TRUSTED -> {
                                     onDismissNetworkDialog()
                                     SelectionContainer {
-                                        LazyColumn(
+                                        ScrollableListWithDraggableScrollbar(
                                             state = listState,
+                                            coroutineScope = scope,
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .draggableScrollbar(listState, scope)
                                                 .padding(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 12.dp)
                                         ) {
                                             itemsIndexed(displayLines) { _, address ->

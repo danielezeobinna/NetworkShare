@@ -6,7 +6,6 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -21,7 +20,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.HorizontalDivider
@@ -46,7 +44,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.danieleze.networkshare.R
-import com.danieleze.networkshare.draggableScrollbar
+import com.danieleze.networkshare.ScrollableListWithDraggableScrollbar
 import kotlinx.coroutines.delay
 
 @Composable
@@ -107,16 +105,15 @@ fun NetworkListScreen(
                             )
                         }
                     } else {
-                        LazyColumn(
+                        ScrollableListWithDraggableScrollbar(
                             state = listState,
+                            coroutineScope = scope,
                             modifier = Modifier
-                                .fillMaxSize()
-                                .draggableScrollbar(listState, scope),
+                                .fillMaxSize(),
                             contentPadding = PaddingValues(
                                 horizontal = 24.dp,
                                 vertical = 32.dp
-                            ),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                            )
                         ) {
                             itemsIndexed(networks, key = { _, ssid -> ssid }) { index, ssid ->
                                 NetworkRow(

@@ -74,6 +74,7 @@ dependencies {
     implementation(libs.androidx.ui)
     implementation("com.jaredrummler:android-device-names:2.1.1")
     implementation("com.google.android.gms:play-services-ads:23.6.0")
+    implementation(libs.androidx.compose.foundation.foundation2)
     testImplementation(libs.junit)
     implementation("androidx.browser:browser:1.8.0")
     androidTestImplementation(libs.androidx.junit)

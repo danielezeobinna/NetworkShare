@@ -9,7 +9,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -24,7 +23,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -54,7 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.danieleze.networkshare.FolderItem
 import com.danieleze.networkshare.R
-import com.danieleze.networkshare.draggableScrollbar
+import com.danieleze.networkshare.ScrollableListWithDraggableScrollbar
 import com.danieleze.networkshare.ui.theme.LocalDarkTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -89,6 +87,7 @@ fun FilePickerSection(
                 currentPath =
                     if (availableStorages.any { it.absolutePath == currentPath?.absolutePath }) null
                     else currentPath?.parentFile
+                onClearItems()
             }
         }
     }
@@ -190,10 +189,12 @@ fun FilePickerSection(
                                         fontWeight = FontWeight.SemiBold,
                                         color = if (index == pathParts.size - 1) MaterialTheme.colorScheme.onSurface else Color.Gray,
                                         modifier = Modifier.clickable {
-                                            scope.launch {
-                                                isExiting = true; delay(220); isExiting =
-                                                false; currentPath =
-                                                file; onClearItems()
+                                            if (file.absolutePath != currentPath?.absolutePath) {
+                                                scope.launch {
+                                                    isExiting = true; delay(220); isExiting =
+                                                    false; currentPath =
+                                                    file; onClearItems()
+                                                }
                                             }
                                         }
                                     )
@@ -210,14 +211,13 @@ fun FilePickerSection(
                         .fillMaxSize()
                         .background(color = MaterialTheme.colorScheme.surfaceVariant)
                 ) {
-                    LazyColumn(
+                    ScrollableListWithDraggableScrollbar(
                         state = listState,
+                        coroutineScope = scope,
                         modifier = Modifier
                             .fillMaxSize()
-                            .draggableScrollbar(listState, scope)
                             .graphicsLayer(alpha = if (isLoading) 0f else 1f),
-                        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 32.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 32.dp)
                     ) {
                         items(itemsToShow, key = { it.file.absolutePath }) { folderItem ->
                             val isStorageRoot = remember(isExiting) { currentPath == null }
