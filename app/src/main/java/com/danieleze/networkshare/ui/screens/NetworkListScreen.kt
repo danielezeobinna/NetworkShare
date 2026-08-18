@@ -44,7 +44,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.danieleze.networkshare.R
-import com.danieleze.networkshare.ScrollableListWithDraggableScrollbar
+import com.danieleze.networkshare.ui.components.ScrollableListWithDraggableScrollbar
 import kotlinx.coroutines.delay
 
 @Composable

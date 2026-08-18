@@ -83,7 +83,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.danieleze.networkshare.NetworkState
 import com.danieleze.networkshare.R
-import com.danieleze.networkshare.ScrollableListWithDraggableScrollbar
+import com.danieleze.networkshare.ui.components.ScrollableListWithDraggableScrollbar
 import com.danieleze.networkshare.ui.theme.AppTheme
 import com.danieleze.networkshare.ui.theme.NetworkShareTheme
 import kotlinx.coroutines.delay
@@ -126,7 +126,6 @@ fun DiscoveryScreen(
     val focusManager = LocalFocusManager.current
     val focusRequester = remember { FocusRequester() }
     val softwareKeyboardController = LocalSoftwareKeyboardController.current
-    val networkState = networkState
 
     var isRefreshing by remember { mutableStateOf(false) }
     val pullRefreshState = rememberPullToRefreshState()

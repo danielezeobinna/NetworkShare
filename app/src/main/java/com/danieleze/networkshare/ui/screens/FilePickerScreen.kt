@@ -52,7 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.danieleze.networkshare.FolderItem
 import com.danieleze.networkshare.R
-import com.danieleze.networkshare.ScrollableListWithDraggableScrollbar
+import com.danieleze.networkshare.ui.components.ScrollableListWithDraggableScrollbar
 import com.danieleze.networkshare.ui.theme.LocalDarkTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -70,6 +70,7 @@ fun FilePickerSection(
     onFolderScanRequest: (File?) -> Unit,
     onRefreshServer: () -> Unit,
     onToggleSelection: (String) -> Unit,
+    getStorageLabel: (String) -> String,
 ) {
     val context = LocalContext.current
     val listState = rememberLazyListState()
@@ -95,7 +96,9 @@ fun FilePickerSection(
     val pathParts = remember(currentPath) {
         val parts = mutableListOf<File>()
         var temp = currentPath
-        while (temp != null) { parts.add(0, temp); temp = temp.parentFile }
+        while (temp != null) {
+            parts.add(0, temp); temp = temp.parentFile
+        }
         parts
     }
 
@@ -167,13 +170,11 @@ fun FilePickerSection(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             pathParts.forEachIndexed { index, file ->
-                                val rawName = when {
-                                    file.absolutePath.endsWith("emulated/0") -> "Internal"
-                                    file.absolutePath.startsWith("/storage/") && file.parentFile?.path == "/storage" ->
-                                        if (file.name.contains("-")) "SD Card" else "USB"
-
-                                    else -> file.name
-                                }
+                                val rawName =
+                                    if (availableStorages.any { it.absolutePath == file.absolutePath })
+                                        getStorageLabel(file.absolutePath)
+                                    else
+                                        file.name
                                 if (file.path != "/" && file.path != "/storage" && file.path != "/storage/emulated") {
                                     Icon(
                                         painter = painterResource(id = R.drawable.baseline_chevron_right),
@@ -223,11 +224,8 @@ fun FilePickerSection(
                             val isStorageRoot = remember(isExiting) { currentPath == null }
                             val isLast = folderItem == itemsToShow.last()
                             val label = remember(folderItem, isStorageRoot) {
-                                when {
-                                    isStorageRoot && folderItem.file.absolutePath.contains("emulated/0") -> "Internal Storage"
-                                    isStorageRoot -> "SD Card (${folderItem.name})"
-                                    else -> folderItem.name
-                                }
+                                if (isStorageRoot) getStorageLabel(folderItem.file.absolutePath)
+                                else folderItem.name
                             }
                             StorageRow(
                                 name = label,
@@ -255,7 +253,11 @@ fun FilePickerSection(
                                             currentPath = folderItem.file
                                         }
                                     } else {
-                                        Toast.makeText(context, "No sub-folders inside", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(
+                                            context,
+                                            "No sub-folders inside",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
                                     }
                                 },
                                 onToggleSelection = { onToggleSelection(folderItem.file.absolutePath) }

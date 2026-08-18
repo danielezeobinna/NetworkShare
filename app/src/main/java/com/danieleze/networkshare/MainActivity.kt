@@ -26,22 +26,11 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
@@ -67,8 +56,6 @@ import com.google.android.gms.ads.AdView
 import com.google.android.gms.ads.LoadAdError
 import com.google.android.gms.ads.MobileAds
 import com.google.android.gms.ads.interstitial.InterstitialAd
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.launch
 import java.io.File
 
 /**
@@ -207,46 +194,80 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                             LocationOffDialog(
                                                 show = viewModel.showLocationOffDialog,
                                                 appTheme = viewModel.appTheme,
-                                                onDismiss = { viewModel.showLocationOffDialog = false },
+                                                onDismiss = {
+                                                    viewModel.showLocationOffDialog = false
+                                                },
                                                 onOpenSettings = {
                                                     viewModel.pendingLocationCheck = true
-                                                    startService(Intent(this@MainActivity, AppControlService::class.java))
+                                                    startService(
+                                                        Intent(
+                                                            this@MainActivity,
+                                                            AppControlService::class.java
+                                                        )
+                                                    )
                                                 }
                                             )
                                             UnknownNetworkDialog(
                                                 show = viewModel.showUnknownNetworkDialog,
                                                 ssid = pendingTrustSsid,
                                                 appTheme = viewModel.appTheme,
-                                                onDismiss = { viewModel.showUnknownNetworkDialog = false },
+                                                onDismiss = {
+                                                    viewModel.showUnknownNetworkDialog = false
+                                                },
                                                 onAllow = {
-                                                    viewModel.allowNetwork(this@MainActivity, pendingTrustSsid!!)
+                                                    viewModel.allowNetwork(
+                                                        this@MainActivity,
+                                                        pendingTrustSsid!!
+                                                    )
                                                     viewModel.clearPendingTrustSsid()
-                                                    startService(Intent(this@MainActivity, WebDAVService::class.java).apply {
-                                                        action = "RESTORE_NOTIFICATION"
-                                                    })
+                                                    startService(
+                                                        Intent(
+                                                            this@MainActivity,
+                                                            WebDAVService::class.java
+                                                        ).apply {
+                                                            action = "RESTORE_NOTIFICATION"
+                                                        })
                                                 },
                                                 onAllowOnce = {
                                                     viewModel.allowNetworkOnce(pendingTrustSsid!!)
                                                     viewModel.clearPendingTrustSsid()
-                                                    startService(Intent(this@MainActivity, WebDAVService::class.java).apply {
-                                                        action = "RESTORE_NOTIFICATION"
-                                                    })
+                                                    startService(
+                                                        Intent(
+                                                            this@MainActivity,
+                                                            WebDAVService::class.java
+                                                        ).apply {
+                                                            action = "RESTORE_NOTIFICATION"
+                                                        })
                                                 },
                                                 onBlock = {
-                                                    viewModel.blockNetwork(this@MainActivity, pendingTrustSsid!!)
+                                                    viewModel.blockNetwork(
+                                                        this@MainActivity,
+                                                        pendingTrustSsid!!
+                                                    )
                                                     viewModel.clearPendingTrustSsid()
-                                                    startService(Intent(this@MainActivity, WebDAVService::class.java).apply {
-                                                        action = "RESTORE_NOTIFICATION"
-                                                    })
+                                                    startService(
+                                                        Intent(
+                                                            this@MainActivity,
+                                                            WebDAVService::class.java
+                                                        ).apply {
+                                                            action = "RESTORE_NOTIFICATION"
+                                                        })
                                                 }
                                             )
                                             NotificationPermissionDialog(
                                                 show = viewModel.showNotificationDialog,
                                                 appTheme = viewModel.appTheme,
-                                                onDismiss = { viewModel.showNotificationDialog = false },
+                                                onDismiss = {
+                                                    viewModel.showNotificationDialog = false
+                                                },
                                                 onOpenSettings = {
                                                     viewModel.pendingNotificationCheck = true
-                                                    startService(Intent(this@MainActivity, AppControlService::class.java))
+                                                    startService(
+                                                        Intent(
+                                                            this@MainActivity,
+                                                            AppControlService::class.java
+                                                        )
+                                                    )
                                                 }
                                             )
                                             NoNetworkDialog(
@@ -255,9 +276,10 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                                 onDismiss = { viewModel.showNetworkDialog = false },
                                                 onHotspot = {
                                                     viewModel.isWaitingForHotspot = true
-                                                    val i = Intent("android.settings.TETHER_SETTINGS").apply {
-                                                        addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY)
-                                                    }
+                                                    val i =
+                                                        Intent("android.settings.TETHER_SETTINGS").apply {
+                                                            addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY)
+                                                        }
                                                     try {
                                                         startActivity(i)
                                                     } catch (_: Exception) {
@@ -298,16 +320,34 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                                         title = "Allowed Networks",
                                                         networks = viewModel.allowedNetworks,
                                                         iconRes = R.drawable.ic_wifi,
-                                                        onRemove = { ssid -> viewModel.removeNetwork(this@MainActivity, ssid) },
-                                                        onBack = { navigatingForward = false; showAllowedNetworks.value = false }
+                                                        onRemove = { ssid ->
+                                                            viewModel.removeNetwork(
+                                                                this@MainActivity,
+                                                                ssid
+                                                            )
+                                                        },
+                                                        onBack = {
+                                                            navigatingForward =
+                                                                false; showAllowedNetworks.value =
+                                                            false
+                                                        }
                                                     )
 
                                                     "blockedNetworks" -> NetworkListScreen(
                                                         title = "Blocked Networks",
                                                         networks = viewModel.blockedNetworks,
                                                         iconRes = R.drawable.ic_wifi,
-                                                        onRemove = { ssid -> viewModel.removeNetwork(this@MainActivity, ssid) },
-                                                        onBack = { navigatingForward = false; showBlockedNetworks.value = false }
+                                                        onRemove = { ssid ->
+                                                            viewModel.removeNetwork(
+                                                                this@MainActivity,
+                                                                ssid
+                                                            )
+                                                        },
+                                                        onBack = {
+                                                            navigatingForward =
+                                                                false; showBlockedNetworks.value =
+                                                            false
+                                                        }
                                                     )
 
                                                     "discovery" -> DiscoveryScreen(
@@ -327,7 +367,9 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                                                     })
                                                             }
                                                         },
-                                                        onNoNetwork = { viewModel.showNetworkDialog = true },
+                                                        onNoNetwork = {
+                                                            viewModel.showNetworkDialog = true
+                                                        },
                                                         onDismissNetworkDialog = {
                                                             viewModel.showNetworkDialog = false
                                                         },
@@ -350,7 +392,11 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                                                 true; showUserGuide.value = true
                                                         },
                                                         currentTheme = viewModel.appTheme,
-                                                        onThemeChange = { theme -> viewModel.saveTheme(theme) },
+                                                        onThemeChange = { theme ->
+                                                            viewModel.saveTheme(
+                                                                theme
+                                                            )
+                                                        },
                                                         isDark = darkTheme,
                                                         networkState = viewModel.networkState,
                                                         isAuthEnabled = viewModel.isAuthEnabled,
@@ -358,27 +404,60 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                                         password = viewModel.password,
                                                         noPaths = viewModel.selectedPaths.isEmpty(),
                                                         onAuthToggle = { enabled ->
-                                                            viewModel.setAuthEnabled(enabled, this@MainActivity)
+                                                            viewModel.setAuthEnabled(
+                                                                enabled,
+                                                                this@MainActivity
+                                                            )
                                                             if (!enabled) handleToggle(false)
                                                         },
-                                                        onUsernameChange = { viewModel.setUsername(it) },
-                                                        onPasswordChange = { viewModel.setPassword(it) },
-                                                        onSaveCredentials = { viewModel.saveCredentials(this@MainActivity) },
+                                                        onUsernameChange = {
+                                                            viewModel.setUsername(
+                                                                it
+                                                            )
+                                                        },
+                                                        onPasswordChange = {
+                                                            viewModel.setPassword(
+                                                                it
+                                                            )
+                                                        },
+                                                        onSaveCredentials = {
+                                                            viewModel.saveCredentials(
+                                                                this@MainActivity
+                                                            )
+                                                        },
                                                     )
 
                                                     else -> FilePickerSection(
-                                                        onBack = { navigatingForward = false; isPickerOpen.value = false },
+                                                        onBack = {
+                                                            navigatingForward =
+                                                                false; isPickerOpen.value = false
+                                                        },
                                                         currentPath = currentPickerPath,
                                                         items = viewModel.scannedItems,
+                                                        getStorageLabel = { path ->
+                                                            viewModel.getStorageLabel(
+                                                                path
+                                                            )
+                                                        },
                                                         selectedPaths = viewModel.selectedPaths,
                                                         isLoading = viewModel.isScanning,
-                                                        availableStorages = viewModel.getAvailableStorages(this@MainActivity),
+                                                        availableStorages = viewModel.getAvailableStorages(
+                                                            this@MainActivity
+                                                        ),
                                                         onFolderScanRequest = { path ->
                                                             if (path == null) {
                                                                 viewModel.clearScannedItems()
                                                                 viewModel.scannedItems.addAll(
-                                                                    viewModel.getAvailableStorages(this@MainActivity)
-                                                                        .map { FolderItem(it, it.name, true) }
+                                                                    viewModel.getAvailableStorages(
+                                                                        this@MainActivity
+                                                                    )
+                                                                        .map {
+                                                                            FolderItem(
+                                                                                it,
+                                                                                it.name,
+                                                                                true
+                                                                            )
+                                                                        }
                                                                 )
                                                             } else {
                                                                 viewModel.requestFolderScan(path)
@@ -386,17 +465,28 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                                         },
                                                         onRefreshServer = {
                                                             if (viewModel.isServiceRunning()) {
-                                                                startService(Intent(this@MainActivity, WebDAVService::class.java).apply {
-                                                                    action = "REFRESH_INFO"
-                                                                })
+                                                                startService(
+                                                                    Intent(
+                                                                        this@MainActivity,
+                                                                        WebDAVService::class.java
+                                                                    ).apply {
+                                                                        action = "REFRESH_INFO"
+                                                                    })
                                                             }
                                                         },
                                                         onToggleSelection = { path ->
-                                                            viewModel.togglePathSelection(path, this@MainActivity)
+                                                            viewModel.togglePathSelection(
+                                                                path,
+                                                                this@MainActivity
+                                                            )
                                                             if (viewModel.isServiceRunning()) {
-                                                                startService(Intent(this@MainActivity, WebDAVService::class.java).apply {
-                                                                    action = "REFRESH_INFO"
-                                                                })
+                                                                startService(
+                                                                    Intent(
+                                                                        this@MainActivity,
+                                                                        WebDAVService::class.java
+                                                                    ).apply {
+                                                                        action = "REFRESH_INFO"
+                                                                    })
                                                             }
                                                         },
                                                         onClearItems = { viewModel.clearScannedItems() },
@@ -486,7 +576,8 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
             isShowingAd = false
             refreshServiceIfRunning()
             val pending = viewModel.pendingTrustSsid
-            if (pending != null && viewModel.isDiscoveryOn) viewModel.showUnknownNetworkDialog = true
+            if (pending != null && viewModel.isDiscoveryOn) viewModel.showUnknownNetworkDialog =
+                true
             return
         }
 
@@ -827,83 +918,5 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
             if (cut != -1) result = result?.substring(cut + 1)
         }
         return result
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Scrollbar modifier (shared utility)
-// ─────────────────────────────────────────────────────────────────────────────
-@Composable
-fun ScrollableListWithDraggableScrollbar(
-    state: LazyListState,
-    coroutineScope: CoroutineScope,
-    modifier: Modifier = Modifier,
-    color: Color = Color.DarkGray.copy(alpha = 0.6f),
-    contentPadding: PaddingValues = PaddingValues(0.dp),
-    content: LazyListScope.() -> Unit
-) {
-    var isPressed by remember { mutableStateOf(false) }
-    val touchStripWidth = 32.dp
-
-    Box(modifier = modifier) {
-        LazyColumn(
-            state = state,
-            modifier = Modifier
-                .fillMaxSize()
-                .drawWithContent {
-                    drawContent()
-                    val layoutInfo = state.layoutInfo
-                    val totalItems = layoutInfo.totalItemsCount
-                    val visibleItems = layoutInfo.visibleItemsInfo
-                    if (visibleItems.size < totalItems) {
-                        val viewportHeight = size.height
-                        val scrollbarHeight =
-                            (viewportHeight * visibleItems.size / totalItems).coerceAtLeast(64f)
-                        val scrollProgress = state.firstVisibleItemIndex.toFloat() / totalItems
-                        val scrollbarOffsetY = scrollProgress * viewportHeight
-                        val thickness = if (isPressed) 8.dp.toPx() else 6.dp.toPx()
-                        val barColor = if (isPressed) Color(0xFF2BAED5).copy(alpha = 0.6f) else color
-                        val marginEnd = 8.dp.toPx()
-                        drawRoundRect(
-                            color = barColor,
-                            topLeft = Offset(
-                                size.width - marginEnd - thickness,
-                                scrollbarOffsetY.coerceIn(0f, viewportHeight - scrollbarHeight)
-                            ),
-                            size = Size(thickness, scrollbarHeight),
-                            cornerRadius = CornerRadius(thickness / 2, thickness / 2)
-                        )
-                    }
-                },
-            contentPadding = contentPadding,
-            content = content
-        )
-
-        Box(
-            modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .width(touchStripWidth)
-                .fillMaxHeight()
-                .pointerInput(state) {
-                    detectDragGestures(
-                        onDragStart = { isPressed = true },
-                        onDragEnd = { isPressed = false },
-                        onDragCancel = { isPressed = false },
-                        onDrag = { change, _ ->
-                            change.consume()
-                            val totalItems = state.layoutInfo.totalItemsCount
-                            if (totalItems > 0) {
-                                val targetIndex =
-                                    ((change.position.y / size.height) * totalItems).toInt()
-                                coroutineScope.launch {
-                                    state.scrollToItem(
-                                        targetIndex.coerceIn(0, totalItems - 1)
-                                    )
-                                }
-                            }
-                        }
-                    )
-                }
-        )
     }
 }

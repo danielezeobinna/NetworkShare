@@ -117,6 +117,8 @@ class AppControl(application: Application) : androidx.lifecycle.AndroidViewModel
         WebDAVService.savePaths(context)
     }
 
+    fun getStorageLabel(path: String) = FileManager.getStorageLabel(path)
+
     fun requestFolderScan(path: File?) {
         FileManager.requestFolderScan(path)
     }

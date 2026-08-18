@@ -17,10 +17,10 @@ data class FolderItem(
 object FileManager {
 
     var selectedPaths = mutableStateListOf<String>()
-    var scannedItems  = mutableStateListOf<FolderItem>()
-    var isScanning    = mutableStateOf(false)
+    var scannedItems = mutableStateListOf<FolderItem>()
+    var isScanning = mutableStateOf(false)
     var tempPriorityPath: String? = null
-    var storageRoots  = mutableMapOf<String, String>()
+    var storageRoots = mutableMapOf<String, String>()
 
     private val storageLabelIniContent = """
     [ViewState]
@@ -129,10 +129,12 @@ object FileManager {
         mediaReceiver?.let {
             try {
                 context.applicationContext.unregisterReceiver(it)
-            } catch (_: Exception) { }
+            } catch (_: Exception) {
+            }
         }
         mediaReceiver = null
     }
+
     private fun desktopIniFile(cacheKey: String, content: String): File? {
         val cacheDir = File(System.getProperty("java.io.tmpdir"), "virtual_desktop_ini")
         if (!cacheDir.exists()) cacheDir.mkdirs()
@@ -160,6 +162,7 @@ object FileManager {
     }
 
     fun getAvailableStorages(context: Context): List<File> {
+        refreshStorageRoots(context)
         val storages = mutableListOf<File>()
         context.getExternalFilesDirs(null).forEach { dir ->
             if (dir != null) {
@@ -172,6 +175,11 @@ object FileManager {
             }
         }
         return storages
+    }
+
+    fun getStorageLabel(path: String): String {
+        storageRoots.entries.firstOrNull { it.value == path }?.let { return it.key }
+        return File(path).name.ifBlank { "Storage" }
     }
 
     fun toggleSelection(path: String) {
@@ -214,7 +222,8 @@ object FileManager {
                 return desktopIniFile("label_$label", storageLabelIniContent) ?: 404
             }
             val folderName = file.parentFile?.name
-            val isStorageRoot = folderName != null && rootPath == file.parentFile?.parentFile?.absolutePath
+            val isStorageRoot =
+                folderName != null && rootPath == file.parentFile?.parentFile?.absolutePath
             if (isStorageRoot) {
                 val content = desktopIniContent[folderName] ?: return null
                 return desktopIniFile("${label}_$folderName", content) ?: 404
