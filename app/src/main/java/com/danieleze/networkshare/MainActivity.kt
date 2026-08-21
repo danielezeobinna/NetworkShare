@@ -75,6 +75,72 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     private var isShowingAd = false
     private var interstitialAd: InterstitialAd? = null
 
+    // ── Permission heartbeat ──────────────────────
+    private val permHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var isHeartbeatActive = false
+
+    private val heartbeat = object : Runnable {
+        override fun run() {
+            checkPendingPermissions()
+
+            val stillPending = viewModel.pendingNotificationCheck ||
+                    viewModel.pendingLocationCheck ||
+                    viewModel.pendingStorageCheck
+
+            if (stillPending) {
+                permHandler.postDelayed(this, 1000L)
+            } else {
+                isHeartbeatActive = false
+            }
+        }
+    }
+
+    private fun startHeartbeatIfNeeded() {
+        if (!isHeartbeatActive) {
+            isHeartbeatActive = true
+            permHandler.post(heartbeat)
+        }
+    }
+
+    private fun bringAppForward() {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+        }
+        startActivity(intent)
+    }
+
+    private fun checkPendingPermissions() {
+        if (viewModel.pendingNotificationCheck) {
+            val notifManager = getSystemService(android.app.NotificationManager::class.java)
+            if (notifManager.areNotificationsEnabled()) {
+                viewModel.pendingNotificationCheck = false
+                viewModel.showNotificationDialog = false
+                bringAppForward()
+                handleToggle(true)
+            }
+        }
+
+        if (viewModel.pendingLocationCheck) {
+            val lm = getSystemService(LOCATION_SERVICE) as android.location.LocationManager
+            val isOn = lm.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER) ||
+                    lm.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER)
+            if (isOn) {
+                viewModel.pendingLocationCheck = false
+                viewModel.showLocationOffDialog = false
+                bringAppForward()
+                checkLocationForUntrustedNetwork()
+            }
+        }
+
+        if (viewModel.pendingStorageCheck && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (Environment.isExternalStorageManager()) {
+                viewModel.pendingStorageCheck = false
+                bringAppForward()
+                isUnlocked = true
+            }
+        }
+    }
+
     // ── Permission launcher ───────────────────────────────────────────────────
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -114,7 +180,6 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         super.onCreate(savedInstanceState)
         instance = this
         Log.d("AppControl", "STARTED — app opened")
-        startService(Intent(this, AppControlService::class.java))
 
         if (savedInstanceState == null) isUnlocked = false
 
@@ -123,7 +188,6 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         viewModel.loadStorageRoots(this.applicationContext)
 
         if (savedInstanceState == null) {
-            handleIncomingShare(intent)
             viewModel.loadAddresses()
         }
 
@@ -199,12 +263,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                                 },
                                                 onOpenSettings = {
                                                     viewModel.pendingLocationCheck = true
-                                                    startService(
-                                                        Intent(
-                                                            this@MainActivity,
-                                                            AppControlService::class.java
-                                                        )
-                                                    )
+                                                    startHeartbeatIfNeeded()
                                                 }
                                             )
                                             UnknownNetworkDialog(
@@ -262,12 +321,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                                 },
                                                 onOpenSettings = {
                                                     viewModel.pendingNotificationCheck = true
-                                                    startService(
-                                                        Intent(
-                                                            this@MainActivity,
-                                                            AppControlService::class.java
-                                                        )
-                                                    )
+                                                    startHeartbeatIfNeeded()
                                                 }
                                             )
                                             NoNetworkDialog(
@@ -596,7 +650,6 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        handleIncomingShare(intent)
     }
 
     @Deprecated("Deprecated in Java")
@@ -636,7 +689,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
             instance = null
         }
         Log.d("AppControl", "STOPPED — app closed")
-        stopService(Intent(this, AppControlService::class.java))
+        permHandler.removeCallbacks(heartbeat)
         super.onDestroy()
     }
 
@@ -714,7 +767,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                 }
                 viewModel.pendingStorageCheck = true
                 startActivity(intent)
-                startService(Intent(this, AppControlService::class.java))
+                startHeartbeatIfNeeded()
             } else {
                 isUnlocked = true
             }
@@ -832,91 +885,5 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                 }
             }
         )
-    }
-
-    // ── Incoming share handling ───────────────────────────────────────────────
-    fun handleIncomingShare(intent: Intent) {
-        val action = intent.action
-        val type = intent.type
-        if (Intent.ACTION_SEND == action && type != null) {
-            val uri = androidx.core.content.IntentCompat.getParcelableExtra(
-                intent, Intent.EXTRA_STREAM, android.net.Uri::class.java
-            )
-            if (uri != null) saveUriToSharedFolder(uri)
-        } else if (Intent.ACTION_SEND_MULTIPLE == action && type != null) {
-            androidx.core.content.IntentCompat.getParcelableArrayListExtra(
-                intent, Intent.EXTRA_STREAM, android.net.Uri::class.java
-            )?.forEach { saveUriToSharedFolder(it) }
-        }
-    }
-
-    private fun saveUriToSharedFolder(uri: android.net.Uri) {
-        try {
-            val rootDir = Environment.getExternalStorageDirectory()
-            val networkShareDir = File(rootDir, "NetworkShare")
-
-            if (!networkShareDir.exists()) {
-                if (!networkShareDir.mkdirs())
-                    Log.e("NetworkShare", "Could not create root folder, check permissions")
-            }
-
-            val fileName = getFileName(uri) ?: "shared_${System.currentTimeMillis()}"
-            val extension = fileName.substringAfterLast('.', "").lowercase()
-
-            val isDirectory = contentResolver.getType(uri) == "vnd.android.cursor.item/directory"
-            val subFolder = when {
-                isDirectory -> "Folders"
-                extension in listOf("apk", "exe") -> "Apps"
-                extension in listOf("mp3", "wav", "m4a", "flac", "ogg") -> "Audio"
-                extension in listOf("mp4", "mkv", "mov", "avi", "webm") -> "Video"
-                extension in listOf("jpg", "jpeg", "png", "gif", "webp", "bmp") -> "Pictures"
-                extension in listOf(
-                    "pdf",
-                    "doc",
-                    "docx",
-                    "txt",
-                    "xls",
-                    "xlsx",
-                    "ppt",
-                    "pptx"
-                ) -> "Documents"
-
-                else -> "Others"
-            }
-
-            val targetDir = File(networkShareDir, subFolder).also { if (!it.exists()) it.mkdirs() }
-            val destFile = File(targetDir, fileName)
-
-            contentResolver.openInputStream(uri)?.use { it.copyTo(destFile.outputStream()) }
-
-            val path = networkShareDir.absolutePath
-            viewModel.addSelectedPath(path, this)
-            viewModel.setTempPriorityPath(path)
-
-            Toast.makeText(this, "Shared on NetworkShare", Toast.LENGTH_SHORT).show()
-            startService(Intent(this, WebDAVService::class.java).apply { action = "REFRESH_INFO" })
-
-        } catch (e: Exception) {
-            Log.e("NetworkShare", "Error: ${e.message}")
-            Toast.makeText(this, "Error saving file", Toast.LENGTH_LONG).show()
-        }
-    }
-
-    private fun getFileName(uri: android.net.Uri): String? {
-        var result: String? = null
-        if (uri.scheme == "content") {
-            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    val index = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                    if (index != -1) result = cursor.getString(index)
-                }
-            }
-        }
-        if (result == null) {
-            result = uri.path
-            val cut = result?.lastIndexOf('/') ?: -1
-            if (cut != -1) result = result?.substring(cut + 1)
-        }
-        return result
     }
 }

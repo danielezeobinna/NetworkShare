@@ -3,6 +3,7 @@ package com.danieleze.networkshare
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Environment
 import android.os.storage.StorageManager
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -30,17 +31,9 @@ object FileManager {
     [.ShellClassInfo]
     IconResource=C:\Windows\System32\SHELL32.dll,8
 """.trimIndent()
-    private val desktopIniContent = mapOf(
-        "Android" to """
-        [ViewState]
-        Mode=
-        Vid=
-        FolderType=Generic
-        [.ShellClassInfo]
-        InfoTip=Contains system files and folders
-        IconResource=C:\Windows\System32\SHELL32.dll,314
-    """.trimIndent(),
-        "DCIM" to """
+    private val desktopIniContent: Map<String, String> by lazy {
+        mapOf(
+            Environment.DIRECTORY_DCIM to """
         [ViewState]
         Mode=
         Vid=
@@ -49,15 +42,15 @@ object FileManager {
         InfoTip=Contains photos and footage taken by the camera
         IconResource=C:\Windows\System32\SHELL32.dll,117
     """.trimIndent(),
-        "Documents" to """
+            Environment.DIRECTORY_DOCUMENTS to """
         [ViewState]
         Mode=
         Vid=
         FolderType=Documents
         [.ShellClassInfo]
-        IconResource=C:\Windows\System32\SHELL32.dll,126
+        IconResource=C:\WINDOWS\System32\imageres.dll,85
     """.trimIndent(),
-        "Download" to """
+            Environment.DIRECTORY_DOWNLOADS to """
         [ViewState]
         Mode=
         Vid=
@@ -66,43 +59,35 @@ object FileManager {
         InfoTip=Contains downloaded files and folders
         IconResource=%SystemRoot%\system32\imageres.dll,-184
     """.trimIndent(),
-        "Movies" to """
+            Environment.DIRECTORY_MOVIES to """
         [ViewState]
         Mode=
         Vid=
         FolderType=Videos
         [.ShellClassInfo]
         InfoTip=@%SystemRoot%\system32\shell32.dll,-12690
-        IconResource=C:\Windows\System32\SHELL32.dll,129
+        IconResource=C:\WINDOWS\System32\imageres.dll,18
     """.trimIndent(),
-        "Music" to """
+            Environment.DIRECTORY_MUSIC to """
         [ViewState]
         Mode=
         Vid=
         FolderType=Music
         [.ShellClassInfo]
         InfoTip=@%SystemRoot%\system32\shell32.dll,-12689
-        IconResource=C:\Windows\System32\SHELL32.dll,128
+        IconResource=C:\WINDOWS\System32\imageres.dll,103
     """.trimIndent(),
-        "Pictures" to """
+            Environment.DIRECTORY_PICTURES to """
         [ViewState]
         Mode=
         Vid=
         FolderType=Pictures
         [.ShellClassInfo]
         InfoTip=@%SystemRoot%\system32\shell32.dll,-12688
-        IconResource=C:\Windows\System32\SHELL32.dll,127
-    """.trimIndent(),
-        "NetworkShare" to """
-        [ViewState]
-        Mode=
-        Vid=
-        FolderType=Generic
-        [.ShellClassInfo]
-        InfoTip=Contains files and folders that are shared to your network
-        IconResource=%SystemRoot%\System32\imageres.dll,42
+        IconResource=C:\WINDOWS\System32\imageres.dll,108
     """.trimIndent()
-    )
+        ).mapKeys { (type, _) -> Environment.getExternalStoragePublicDirectory(type).name }
+    }
     private var mediaReceiver: android.content.BroadcastReceiver? = null
 
     fun registerMediaReceiver(context: Context) {
