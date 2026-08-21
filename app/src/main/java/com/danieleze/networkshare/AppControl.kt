@@ -30,9 +30,16 @@ class AppControl(application: Application) : androidx.lifecycle.AndroidViewModel
     var pendingNotificationCheck = false
     var pendingLocationCheck = false
     var pendingStorageCheck = false
+    var useFallbackAddress by mutableStateOf(false)
+
+    fun updateUseFallbackAddress(value: Boolean) {
+        useFallbackAddress = value
+        prefs().edit { putBoolean("use_fallback_address", value) }
+    }
 
     init {
         loadAddresses()
+        useFallbackAddress = prefs().getBoolean("use_fallback_address", false)
         val savedTheme = prefs().getString("app_theme", "SYSTEM")
         appTheme = AppTheme.valueOf(savedTheme ?: "SYSTEM")
     }

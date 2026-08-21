@@ -97,6 +97,8 @@ fun DiscoveryScreen(
     isPending: Boolean,
     addresses: String,
     addressesFallback: String,
+    useFallbackAddress: Boolean,
+    onToggleFallbackAddress: () -> Unit,
     onToggle: (Boolean) -> Unit,
     onReload: () -> Unit,
     onOpenPicker: () -> Unit,
@@ -129,7 +131,6 @@ fun DiscoveryScreen(
 
     var isRefreshing by remember { mutableStateOf(false) }
     val pullRefreshState = rememberPullToRefreshState()
-    var useFallbackAddress by remember { mutableStateOf(false) }
 
     var originalUsername by remember { mutableStateOf("") }
     var originalPassword by remember { mutableStateOf("") }
@@ -306,7 +307,7 @@ fun DiscoveryScreen(
                                             .clickable(
                                                 interactionSource = interactionSource,
                                                 indication = null
-                                            ) { useFallbackAddress = !useFallbackAddress }
+                                            ) { onToggleFallbackAddress() }
                                     )
                                 }
                             }
@@ -902,7 +903,9 @@ fun PreviewDiscoveryScreen() {
             onAuthToggle = {},
             onUsernameChange = {},
             onPasswordChange = {},
-            onSaveCredentials = {}
+            onSaveCredentials = {},
+            useFallbackAddress = false,
+            onToggleFallbackAddress = {}
         )
     }
 }

@@ -452,6 +452,8 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                                                             )
                                                         },
                                                         isDark = darkTheme,
+                                                        useFallbackAddress = viewModel.useFallbackAddress,
+                                                        onToggleFallbackAddress = { viewModel.updateUseFallbackAddress(!viewModel.useFallbackAddress) },
                                                         networkState = viewModel.networkState,
                                                         isAuthEnabled = viewModel.isAuthEnabled,
                                                         username = viewModel.username,
