@@ -30,7 +30,6 @@ class WebDAVService : Service(), TransferListener,
     private var wakeLock: android.os.PowerManager.WakeLock? = null
     private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
     private var wifiJustEnabled = false
-    private val activeServers = mutableListOf<WebDAVServer>()
     private val channelId = "WebDAV_Service_Channel"
     private val tag = "WebDAVService"
     private val safetyChannelId = "WebDAV_Safety_Alerts"
@@ -38,16 +37,6 @@ class WebDAVService : Service(), TransferListener,
         context = this,
         friendlyName = getUsername()
     )
-    val friendlyServerAddress: String
-        get() {
-            val server = activeServers.firstOrNull() ?: return "http://0.0.0.0:8080"
-            val sanitizedHostname = getUsername()
-                .lowercase()
-                .filter { it.isLetterOrDigit() || it == '-' }
-                .trim('-')
-                .ifEmpty { "device" }
-            return "${server.scheme}://$sanitizedHostname:${server.port}"
-        }
     // ── NetworkEventListener implementation ──────────────────
     // NetworkManager calls these when network state changes.
 
@@ -350,7 +339,9 @@ class WebDAVService : Service(), TransferListener,
                 val folder = File(path)
                 val isRoot = path == rootPath
                 val relativePath = path.removePrefix(rootPath).trimStart('/')
-                val suffix = if (relativePath.isEmpty()) "/$label" else "/$label/$relativePath"
+                val safeLabel = FileManager.urlSafeSegment(label)
+                val safeRelative = relativePath.split("/").joinToString("/") { FileManager.urlSafeSegment(it) }
+                val suffix = if (safeRelative.isEmpty()) "/$safeLabel" else "/$safeLabel/$safeRelative"
 
                 addressList.add(AddressItem(
                     label = label,
@@ -655,6 +646,34 @@ class WebDAVService : Service(), TransferListener,
         var pendingTrustSsid = mutableStateOf<String?>(null)
         var username = mutableStateOf(Build.MODEL)
         var password = mutableStateOf("pass")
+        var useFallbackAddress = mutableStateOf(false)
+        val activeServers = mutableListOf<WebDAVServer>()
+
+        val friendlyServerAddress: String
+            get() {
+                val server = activeServers.firstOrNull() ?: return "http://0.0.0.0:8080"
+                val sanitizedHostname = username.value
+                    .lowercase()
+                    .filter { it.isLetterOrDigit() || it == '-' }
+                    .trim('-')
+                    .ifEmpty { "device" }
+                return "${server.scheme}://$sanitizedHostname:${server.port}"
+            }
+
+        fun baseAddressForPort(port: Int): String {
+            val server = activeServers.firstOrNull { it.port == port } ?: activeServers.firstOrNull()
+            val scheme = server?.scheme ?: "http"
+            return if (useFallbackAddress.value) {
+                "$scheme://${server?.boundIp ?: "0.0.0.0"}:$port"
+            } else {
+                val sanitizedHostname = username.value
+                    .lowercase()
+                    .filter { it.isLetterOrDigit() || it == '-' }
+                    .trim('-')
+                    .ifEmpty { "device" }
+                "$scheme://$sanitizedHostname:$port"
+            }
+        }
 
         private val cancelledFiles = Collections.synchronizedSet(mutableSetOf<String>())
 
@@ -675,6 +694,7 @@ class WebDAVService : Service(), TransferListener,
                 putBoolean("auth_enabled", isAuthEnabled.value)
                 putString("username", username.value)
                 putString("password", password.value)
+                putBoolean("use_fallback_address", useFallbackAddress.value)
                 putStringSet("shared_paths", FileManager.selectedPaths.toSet())
             }
         }
@@ -684,6 +704,7 @@ class WebDAVService : Service(), TransferListener,
             isAuthEnabled.value = prefs.getBoolean("auth_enabled", true)
             username.value = prefs.getString("username", Build.MODEL) ?: Build.MODEL
             password.value = prefs.getString("password", "pass") ?: "pass"
+            useFallbackAddress.value = prefs.getBoolean("use_fallback_address", false)
             val saved = prefs.getStringSet("shared_paths", null)
             FileManager.selectedPaths.clear()
             if (saved != null) {

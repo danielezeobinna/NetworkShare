@@ -280,4 +280,65 @@ object FileManager {
             storageRoots[finalLabel] = rootPath
         }
     }
+
+    fun resolveRealPath(context: Context, uri: android.net.Uri): String? {
+        if (uri.scheme == "content") {
+            try {
+                val docId = android.provider.DocumentsContract.getDocumentId(uri)
+                if (docId.startsWith("primary:"))
+                    return "${Environment.getExternalStorageDirectory()}/${docId.removePrefix("primary:")}"
+                if (docId.contains(":")) {
+                    val parts = docId.split(":", limit = 2)
+                    return "/storage/${parts[0]}/${parts[1]}"
+                }
+            } catch (e: Exception) {
+                android.util.Log.d("FileManager", "getDocumentId failed: ${e.message}")
+            }
+
+            // Samsung My Files FileProvider — path is embedded directly in the URI segments
+            if (uri.authority == "com.sec.android.app.myfiles.FileProvider") {
+                val segments = uri.pathSegments
+                val storageIndex = segments.indexOf("device_storage")
+                if (storageIndex != -1 && storageIndex + 1 < segments.size) {
+                    val relative = segments.drop(storageIndex + 2).joinToString("/")
+                    if (relative.isNotBlank()) {
+                        return "${Environment.getExternalStorageDirectory()}/$relative"
+                    }
+                }
+            }
+
+            try {
+                context.contentResolver.query(uri, arrayOf("_data"), null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val index = cursor.getColumnIndex("_data")
+                        if (index != -1) {
+                            val path = cursor.getString(index)
+                            if (!path.isNullOrBlank()) return path
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.d("FileManager", "_data query failed: ${e.message}")
+            }
+        }
+        android.util.Log.d("FileManager", "resolveRealPath failed. scheme=${uri.scheme}, authority=${uri.authority}, uri=$uri")
+        if (uri.scheme == "file") return uri.path
+        return null
+    }
+
+    fun findSharedLocation(realPath: String): Pair<String, String>? {
+        val (label, rootPath) = storageRoots.entries
+            .firstOrNull { (_, root) -> realPath == root || realPath.startsWith("$root/") }
+            ?: return null
+        val relativePath = realPath.removePrefix(rootPath).trimStart('/')
+        return label to relativePath
+    }
+
+    fun urlSafeSegment(segment: String): String {
+        return segment
+            .replace("%", "%25")  // must come first, or this would double-encode the others
+            .replace("#", "%23")
+            .replace("?", "%3F")
+            .replace("&", "%26")
+    }
 }

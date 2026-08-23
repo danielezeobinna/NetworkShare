@@ -58,9 +58,6 @@ import com.google.android.gms.ads.MobileAds
 import com.google.android.gms.ads.interstitial.InterstitialAd
 import java.io.File
 
-/**
- * MainActivity — owns the Activities & UI.
- */
 class MainActivity : androidx.fragment.app.FragmentActivity() {
 
     companion object {
