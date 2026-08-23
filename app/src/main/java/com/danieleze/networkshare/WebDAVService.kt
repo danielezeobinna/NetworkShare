@@ -65,8 +65,11 @@ class WebDAVService : Service(), TransferListener,
                         "image/png",
                         stream
                     )
-                } catch (_: Exception) { null }
+                } catch (_: Exception) {
+                    null
+                }
             }
+
             else -> null
         }
     }
@@ -77,7 +80,9 @@ class WebDAVService : Service(), TransferListener,
                 .bufferedReader()
                 .readText()
                 .replace("{{UNC_PATH}}", uncPath)
-        } catch (_: Exception) { null }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     override fun onNetworkTrustChanged(state: NetworkState, ssid: String) {
@@ -87,10 +92,12 @@ class WebDAVService : Service(), TransferListener,
             NetworkState.TRUSTED -> {
                 if (activeServers.isNotEmpty()) restoreSharingNotification(this)
             }
+
             NetworkState.NO_NETWORK -> {
                 if (activeServers.isNotEmpty()) showNoNetworkNotification(this)
                 broadcastCurrentAddresses()
             }
+
             NetworkState.UNTRUSTED -> {
                 when (NetworkManager.getTrust(ssid)) {
                     NetworkManager.Trust.BLOCKED -> showBlockedNetworkNotification(this)
@@ -225,22 +232,22 @@ class WebDAVService : Service(), TransferListener,
         startWebDAVServers()
 
         NetworkManager.registerNetworkCallback(
-            context          = this,
-            onSsidChanged    = { ssid ->
+            context = this,
+            onSsidChanged = { ssid ->
                 currentSsid = ssid
                 NetworkManager.updateNetworkTrust(
-                    context                   = this,
-                    currentSsid               = currentSsid,
-                    wifiJustEnabled           = wifiJustEnabled,
+                    context = this,
+                    currentSsid = currentSsid,
+                    wifiJustEnabled = wifiJustEnabled,
                     onWifiJustEnabledConsumed = { wifiJustEnabled = false }
                 )
             },
-            onNetworkLost    = {
+            onNetworkLost = {
                 currentSsid = ""
                 NetworkManager.updateNetworkTrust(
-                    context                   = this,
-                    currentSsid               = currentSsid,
-                    wifiJustEnabled           = wifiJustEnabled,
+                    context = this,
+                    currentSsid = currentSsid,
+                    wifiJustEnabled = wifiJustEnabled,
                     onWifiJustEnabledConsumed = { wifiJustEnabled = false }
                 )
             }
@@ -340,17 +347,21 @@ class WebDAVService : Service(), TransferListener,
                 val isRoot = path == rootPath
                 val relativePath = path.removePrefix(rootPath).trimStart('/')
                 val safeLabel = FileManager.urlSafeSegment(label)
-                val safeRelative = relativePath.split("/").joinToString("/") { FileManager.urlSafeSegment(it) }
-                val suffix = if (safeRelative.isEmpty()) "/$safeLabel" else "/$safeLabel/$safeRelative"
+                val safeRelative =
+                    relativePath.split("/").joinToString("/") { FileManager.urlSafeSegment(it) }
+                val suffix =
+                    if (safeRelative.isEmpty()) "/$safeLabel" else "/$safeLabel/$safeRelative"
 
-                addressList.add(AddressItem(
-                    label = label,
-                    folderName = folder.name,
-                    friendlyUrl = "$friendlyBase$suffix",
-                    ipUrl = "$ipBase$suffix",
-                    isStorage = isRoot,
-                    isTempVip = path == FileManager.tempPriorityPath
-                ))
+                addressList.add(
+                    AddressItem(
+                        label = label,
+                        folderName = folder.name,
+                        friendlyUrl = "$friendlyBase$suffix",
+                        ipUrl = "$ipBase$suffix",
+                        isStorage = isRoot,
+                        isTempVip = path == FileManager.tempPriorityPath
+                    )
+                )
             }
         }
 
@@ -369,8 +380,12 @@ class WebDAVService : Service(), TransferListener,
         }
 
         val intent = Intent("com.danieleze.networkshare.ADDRESSES_UPDATED")
-        intent.putExtra("address_list", friendlySummary.toString().trim().ifEmpty { "No folders selected." })
-        intent.putExtra("address_list_fallback", ipSummary.toString().trim().ifEmpty { "No folders selected." })
+        intent.putExtra(
+            "address_list",
+            friendlySummary.toString().trim().ifEmpty { "No folders selected." })
+        intent.putExtra(
+            "address_list_fallback",
+            ipSummary.toString().trim().ifEmpty { "No folders selected." })
         intent.putExtra("is_valid_network", isValidNetwork)
         intent.setPackage(packageName)
         sendBroadcast(intent)
@@ -406,9 +421,9 @@ class WebDAVService : Service(), TransferListener,
             .setColor("#2BAED5".toColorInt())
             .setAutoCancel(false)
             .also { if (silent) it.setSilent(true) }
-            .addAction(0, "Allow",      pendingFor(ACTION_ALLOW))
+            .addAction(0, "Allow", pendingFor(ACTION_ALLOW))
             .addAction(0, "Allow Once", pendingFor(ACTION_ALLOW_ONCE))
-            .addAction(0, "Block",      pendingFor(ACTION_BLOCK))
+            .addAction(0, "Block", pendingFor(ACTION_BLOCK))
             .build()
 
         manager?.notify(1, notification)
@@ -425,7 +440,8 @@ class WebDAVService : Service(), TransferListener,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val stopIntent = Intent(context, WebDAVService::class.java).apply { action = "STOP_SERVICE" }
+        val stopIntent =
+            Intent(context, WebDAVService::class.java).apply { action = "STOP_SERVICE" }
         val stopPendingIntent = PendingIntent.getService(
             context, 0, stopIntent, PendingIntent.FLAG_IMMUTABLE
         )
@@ -457,7 +473,8 @@ class WebDAVService : Service(), TransferListener,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val stopIntent = Intent(context, WebDAVService::class.java).apply { action = "STOP_SERVICE" }
+        val stopIntent =
+            Intent(context, WebDAVService::class.java).apply { action = "STOP_SERVICE" }
         val stopPendingIntent = PendingIntent.getService(
             context, 0, stopIntent, PendingIntent.FLAG_IMMUTABLE
         )
@@ -489,7 +506,8 @@ class WebDAVService : Service(), TransferListener,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val stopIntent = Intent(context, WebDAVService::class.java).apply { action = "STOP_SERVICE" }
+        val stopIntent =
+            Intent(context, WebDAVService::class.java).apply { action = "STOP_SERVICE" }
         val stopPendingIntent = PendingIntent.getService(
             context, 0, stopIntent, PendingIntent.FLAG_IMMUTABLE
         )
@@ -565,7 +583,12 @@ class WebDAVService : Service(), TransferListener,
 
     // ── Transfer listener ─────────────────────────────────────
 
-    override fun onTransferProgress(fileName: String, currentBytes: Long, totalBytes: Long, isDownload: Boolean) {
+    override fun onTransferProgress(
+        fileName: String,
+        currentBytes: Long,
+        totalBytes: Long,
+        isDownload: Boolean
+    ) {
         val notificationId = fileName.hashCode()
         val manager = getSystemService(NotificationManager::class.java)
 
@@ -661,7 +684,8 @@ class WebDAVService : Service(), TransferListener,
             }
 
         fun baseAddressForPort(port: Int): String {
-            val server = activeServers.firstOrNull { it.port == port } ?: activeServers.firstOrNull()
+            val server =
+                activeServers.firstOrNull { it.port == port } ?: activeServers.firstOrNull()
             val scheme = server?.scheme ?: "http"
             return if (useFallbackAddress.value) {
                 "$scheme://${server?.boundIp ?: "0.0.0.0"}:$port"
@@ -677,9 +701,14 @@ class WebDAVService : Service(), TransferListener,
 
         private val cancelledFiles = Collections.synchronizedSet(mutableSetOf<String>())
 
-        fun cancelTransfer(fileName: String) { cancelledFiles.add(fileName) }
+        fun cancelTransfer(fileName: String) {
+            cancelledFiles.add(fileName)
+        }
+
         fun isCancelled(fileName: String): Boolean = cancelledFiles.contains(fileName)
-        fun clearCancel(fileName: String) { cancelledFiles.remove(fileName) }
+        fun clearCancel(fileName: String) {
+            cancelledFiles.remove(fileName)
+        }
 
         fun generateToken(): String {
             val input = "${username.value}:${password.value}:NetworkShare"

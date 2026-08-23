@@ -17,16 +17,16 @@ import java.util.Collections
 // ─────────────────────────────────────────────────────────────
 object NetworkManager {
 
-    private const val PREFS       = "network_trust_prefs"
+    private const val PREFS = "network_trust_prefs"
     private const val KEY_ALLOWED = "allowed_networks"
     private const val KEY_BLOCKED = "blocked_networks"
-    private const val TAG         = "NetworkManager"
+    private const val TAG = "NetworkManager"
 
-    const val CHANNEL_ID        = "network_trust_channel"
-    const val EXTRA_SSID        = "extra_ssid"
-    const val ACTION_ALLOW      = "com.danieleze.networkshare.NETWORK_ALLOW"
+    const val CHANNEL_ID = "network_trust_channel"
+    const val EXTRA_SSID = "extra_ssid"
+    const val ACTION_ALLOW = "com.danieleze.networkshare.NETWORK_ALLOW"
     const val ACTION_ALLOW_ONCE = "com.danieleze.networkshare.NETWORK_ALLOW_ONCE"
-    const val ACTION_BLOCK      = "com.danieleze.networkshare.NETWORK_BLOCK"
+    const val ACTION_BLOCK = "com.danieleze.networkshare.NETWORK_BLOCK"
 
     // Persisted
     val allowedNetworks = mutableStateListOf<String>()
@@ -73,6 +73,7 @@ object NetworkManager {
                     when (state) {
                         android.net.wifi.WifiManager.WIFI_STATE_ENABLED ->
                             eventListener?.onWifiEnabled()
+
                         android.net.wifi.WifiManager.WIFI_STATE_DISABLED ->
                             verifyAndStop()
                     }
@@ -89,7 +90,10 @@ object NetworkManager {
 
     fun unregisterHardwareReceiver(context: Context) {
         hardwareReceiver?.let {
-            try { context.unregisterReceiver(it) } catch (_: Exception) {}
+            try {
+                context.unregisterReceiver(it)
+            } catch (_: Exception) {
+            }
         }
         hardwareReceiver = null
     }
@@ -162,10 +166,10 @@ object NetworkManager {
     enum class Trust { ALLOWED, ALLOW_ONCE, BLOCKED, UNKNOWN }
 
     fun getTrust(ssid: String): Trust = when {
-        allowedNetworks.contains(ssid)   -> Trust.ALLOWED
+        allowedNetworks.contains(ssid) -> Trust.ALLOWED
         allowOnceNetworks.contains(ssid) -> Trust.ALLOW_ONCE
-        blockedNetworks.contains(ssid)   -> Trust.BLOCKED
-        else                             -> Trust.UNKNOWN
+        blockedNetworks.contains(ssid) -> Trust.BLOCKED
+        else -> Trust.UNKNOWN
     }
 
     fun isHotspot(ssid: String) = ssid.isBlank() || ssid == "<unknown ssid>"
@@ -192,7 +196,8 @@ object NetworkManager {
                     }
                 }
             }
-        } catch (_: Exception) { }
+        } catch (_: Exception) {
+        }
         return localAddresses.distinct()
     }
 
@@ -240,9 +245,11 @@ object NetworkManager {
                                     val silent = isAppInForeground(context)
                                     eventListener?.onUnknownNetworkDetected(ssid, silent)
                                 }
+
                                 Trust.BLOCKED -> {
                                     Log.d(TAG, "Blocked network: $ssid — server will return 403")
                                 }
+
                                 else -> {
                                     Log.d(TAG, "Trusted network: $ssid")
                                 }
@@ -283,9 +290,11 @@ object NetworkManager {
                                     val silent = isAppInForeground(context)
                                     eventListener?.onUnknownNetworkDetected(ssid, silent)
                                 }
+
                                 Trust.BLOCKED -> {
                                     Log.d(TAG, "Blocked network: $ssid — server will return 403")
                                 }
+
                                 else -> Log.d(TAG, "Trusted network: $ssid")
                             }
                         }
@@ -313,7 +322,8 @@ object NetworkManager {
                 val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE)
                         as android.net.ConnectivityManager
                 cm.unregisterNetworkCallback(it)
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+            }
         }
         networkCallback = null
     }
@@ -332,7 +342,9 @@ object NetworkManager {
             val method = wifiManager.javaClass.getDeclaredMethod("isWifiApEnabled")
             method.isAccessible = true
             method.invoke(wifiManager) as Boolean
-        } catch (_: Exception) { false }
+        } catch (_: Exception) {
+            false
+        }
 
         if (isOnHotspot) {
             eventListener?.onNetworkTrustChanged(NetworkState.TRUSTED, "")
@@ -346,7 +358,8 @@ object NetworkManager {
             val connectivityManager = context.applicationContext
                 .getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
             val network = connectivityManager.activeNetwork
-            val caps = if (network != null) connectivityManager.getNetworkCapabilities(network) else null
+            val caps =
+                if (network != null) connectivityManager.getNetworkCapabilities(network) else null
             val info = caps?.transportInfo as? android.net.wifi.WifiInfo
             info?.ssid?.removeSurrounding("\"") ?: ""
         } else {
@@ -418,9 +431,9 @@ class NetworkActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val ssid = intent.getStringExtra(NetworkManager.EXTRA_SSID) ?: return
         when (intent.action) {
-            NetworkManager.ACTION_ALLOW      -> NetworkManager.allow(context, ssid)
+            NetworkManager.ACTION_ALLOW -> NetworkManager.allow(context, ssid)
             NetworkManager.ACTION_ALLOW_ONCE -> NetworkManager.allowOnce(ssid)
-            NetworkManager.ACTION_BLOCK      -> NetworkManager.block(context, ssid)
+            NetworkManager.ACTION_BLOCK -> NetworkManager.block(context, ssid)
         }
         context.startService(
             Intent(context, WebDAVService::class.java).apply {

@@ -58,7 +58,8 @@ class CopyFileAddressActivity : Activity() {
         val base = WebDAVService.baseAddressForPort(port)
 
         val safeLabel = FileManager.urlSafeSegment(label)
-        val safeRelative = relativePath.split("/").joinToString("/") { FileManager.urlSafeSegment(it) }
+        val safeRelative =
+            relativePath.split("/").joinToString("/") { FileManager.urlSafeSegment(it) }
         val suffix = if (safeRelative.isEmpty()) safeLabel else "$safeLabel/$safeRelative"
 
         return if (WebDAVService.isAuthEnabled.value) {

@@ -161,15 +161,24 @@ fun UnknownNetworkDialog(
                     )
                     Spacer(modifier = Modifier.height(24.dp))
                     Column(modifier = Modifier.fillMaxWidth()) {
-                        TextButton(onClick = { onAllow(); onDismiss() }, modifier = Modifier.fillMaxWidth()) {
+                        TextButton(
+                            onClick = { onAllow(); onDismiss() },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
                             Text("Allow", color = Color(0xFF2BAED5), fontSize = 16.sp)
                         }
 
-                        TextButton(onClick = { onAllowOnce(); onDismiss() }, modifier = Modifier.fillMaxWidth()) {
+                        TextButton(
+                            onClick = { onAllowOnce(); onDismiss() },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
                             Text("Allow Once", color = Color(0xFF2BAED5), fontSize = 16.sp)
                         }
 
-                        TextButton(onClick = { onBlock(); onDismiss() }, modifier = Modifier.fillMaxWidth()) {
+                        TextButton(
+                            onClick = { onBlock(); onDismiss() },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
                             Text("Block", color = Color(0xFF2BAED5), fontSize = 16.sp)
                         }
                     }
@@ -235,7 +244,10 @@ fun NoNetworkDialog(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        TextButton(onClick = { onDismiss(); onHotspot() }, modifier = Modifier.weight(1f)) {
+                        TextButton(
+                            onClick = { onDismiss(); onHotspot() },
+                            modifier = Modifier.weight(1f)
+                        ) {
                             Text("Hotspot", color = Color(0xFF2BAED5), fontSize = 16.sp)
                         }
                         VerticalDivider(

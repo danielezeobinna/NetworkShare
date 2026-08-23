@@ -312,8 +312,9 @@ fun DiscoveryScreen(
                                 }
                             }
 
-                            val addressLines = (if (useFallbackAddress) addressesFallback else addresses)
-                                .split("\n").filter { it.isNotBlank() }
+                            val addressLines =
+                                (if (useFallbackAddress) addressesFallback else addresses)
+                                    .split("\n").filter { it.isNotBlank() }
 
                             val displayLines = if (networkState != NetworkState.TRUSTED) {
                                 val grouped = mutableListOf<String>()
@@ -383,7 +384,12 @@ fun DiscoveryScreen(
                                             coroutineScope = scope,
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .padding(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 12.dp)
+                                                .padding(
+                                                    start = 16.dp,
+                                                    end = 16.dp,
+                                                    top = 0.dp,
+                                                    bottom = 12.dp
+                                                )
                                         ) {
                                             itemsIndexed(displayLines) { _, address ->
                                                 val isUrl = address.startsWith("http")
@@ -392,7 +398,10 @@ fun DiscoveryScreen(
                                                     fontFamily = FontFamily.Monospace,
                                                     fontSize = 14.sp,
                                                     color = if (isUrl) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                                    modifier = Modifier.padding(bottom = if (isUrl) 12.dp else 2.dp, top = 0.dp)
+                                                    modifier = Modifier.padding(
+                                                        bottom = if (isUrl) 12.dp else 2.dp,
+                                                        top = 0.dp
+                                                    )
                                                 )
                                             }
                                         }
@@ -413,7 +422,10 @@ fun DiscoveryScreen(
                                                 fontFamily = FontFamily.Monospace,
                                                 fontSize = 14.sp,
                                                 color = Color.Gray,
-                                                modifier = Modifier.padding(bottom = if (isUrl) 12.dp else 2.dp, top = 0.dp)
+                                                modifier = Modifier.padding(
+                                                    bottom = if (isUrl) 12.dp else 2.dp,
+                                                    top = 0.dp
+                                                )
                                             )
                                         }
                                     }
@@ -484,7 +496,9 @@ fun DiscoveryScreen(
                                     val isValidHostname = remember(username) {
                                         username.isNotBlank() &&
                                                 username.length <= 63 &&
-                                                Regex("^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$").matches(username)
+                                                Regex("^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$").matches(
+                                                    username
+                                                )
                                     }
                                     Row(
                                         horizontalArrangement = Arrangement.End,
@@ -581,14 +595,20 @@ fun DiscoveryScreen(
                                             .offset(y = 4.dp)
                                             .padding(start = 90.dp, end = 16.dp, top = 8.dp),
                                         thickness = if (isValidHostname) 0.5.dp else 1.dp,
-                                        color = if (isValidHostname) Color.Gray.copy(alpha = 0.3f) else Color(0xFFE53935)
+                                        color = if (isValidHostname) Color.Gray.copy(alpha = 0.3f) else Color(
+                                            0xFFE53935
+                                        )
                                     )
                                     if (!isValidHostname && username.isNotEmpty()) {
                                         Text(
                                             text = "No spaces or symbols allowed",
                                             color = Color(0xFFE53935),
                                             fontSize = 12.sp,
-                                            modifier = Modifier.padding(start = 90.dp, end = 16.dp, top = 4.dp)
+                                            modifier = Modifier.padding(
+                                                start = 90.dp,
+                                                end = 16.dp,
+                                                top = 4.dp
+                                            )
                                         )
                                     }
 

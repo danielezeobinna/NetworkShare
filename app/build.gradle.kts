@@ -1,5 +1,6 @@
 import java.util.Properties
 import java.io.FileInputStream
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.android.application)
@@ -26,7 +27,11 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "ADMOB_BANNER_ID", "\"${localProps["ADMOB_BANNER_ID"]}\"")
-        buildConfigField("String", "ADMOB_INTERSTITIAL_ID", "\"${localProps["ADMOB_INTERSTITIAL_ID"]}\"")
+        buildConfigField(
+            "String",
+            "ADMOB_INTERSTITIAL_ID",
+            "\"${localProps["ADMOB_INTERSTITIAL_ID"]}\""
+        )
         manifestPlaceholders["ADMOB_APP_ID"] = localProps["ADMOB_APP_ID"] as String
     }
 
@@ -43,12 +48,16 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
-    kotlinOptions {
-        jvmTarget = "11"
-    }
+
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_11)
     }
 }
 

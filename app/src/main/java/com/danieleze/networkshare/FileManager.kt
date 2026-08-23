@@ -308,20 +308,24 @@ object FileManager {
             }
 
             try {
-                context.contentResolver.query(uri, arrayOf("_data"), null, null, null)?.use { cursor ->
-                    if (cursor.moveToFirst()) {
-                        val index = cursor.getColumnIndex("_data")
-                        if (index != -1) {
-                            val path = cursor.getString(index)
-                            if (!path.isNullOrBlank()) return path
+                context.contentResolver.query(uri, arrayOf("_data"), null, null, null)
+                    ?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            val index = cursor.getColumnIndex("_data")
+                            if (index != -1) {
+                                val path = cursor.getString(index)
+                                if (!path.isNullOrBlank()) return path
+                            }
                         }
                     }
-                }
             } catch (e: Exception) {
                 android.util.Log.d("FileManager", "_data query failed: ${e.message}")
             }
         }
-        android.util.Log.d("FileManager", "resolveRealPath failed. scheme=${uri.scheme}, authority=${uri.authority}, uri=$uri")
+        android.util.Log.d(
+            "FileManager",
+            "resolveRealPath failed. scheme=${uri.scheme}, authority=${uri.authority}, uri=$uri"
+        )
         if (uri.scheme == "file") return uri.path
         return null
     }

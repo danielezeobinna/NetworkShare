@@ -55,7 +55,8 @@ fun ScrollableListWithDraggableScrollbar(
                         val scrollProgress = state.firstVisibleItemIndex.toFloat() / totalItems
                         val scrollbarOffsetY = scrollProgress * viewportHeight
                         val thickness = if (isPressed) 8.dp.toPx() else 6.dp.toPx()
-                        val barColor = if (isPressed) Color(0xFF2BAED5).copy(alpha = 0.6f) else color
+                        val barColor =
+                            if (isPressed) Color(0xFF2BAED5).copy(alpha = 0.6f) else color
                         val marginEnd = 8.dp.toPx()
                         drawRoundRect(
                             color = barColor,
