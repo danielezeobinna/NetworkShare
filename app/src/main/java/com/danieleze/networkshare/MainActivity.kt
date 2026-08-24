@@ -182,6 +182,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 
         viewModel.isPending = false
         viewModel.isDiscoveryOn = viewModel.isServiceRunning()
+        viewModel.loadNetworkList(this.applicationContext)
         viewModel.loadStorageRoots(this.applicationContext)
 
         if (savedInstanceState == null) {

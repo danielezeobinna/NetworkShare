@@ -148,23 +148,18 @@ object FileManager {
 
     fun getAvailableStorages(context: Context): List<File> {
         refreshStorageRoots(context)
-        val storages = mutableListOf<File>()
-        context.getExternalFilesDirs(null).forEach { dir ->
-            if (dir != null) {
-                val path = dir.absolutePath
-                val rootPath = if (path.contains("/Android/")) path.split("/Android/")[0] else path
-                val rootFile = File(rootPath)
-                if (rootFile.exists() && rootFile.canRead() && !storages.contains(rootFile)) {
-                    storages.add(rootFile)
-                }
-            }
-        }
-        return storages
+        return storageRoots.values
+            .map { File(it) }
+            .distinct()
+            .filter { it.exists() && it.canRead() }
+    }
+
+    private fun matchStorageRoot(path: String): Map.Entry<String, String>? {
+        return storageRoots.entries.firstOrNull { (_, root) -> path == root || path.startsWith("$root/") }
     }
 
     fun getStorageLabel(path: String): String {
-        storageRoots.entries.firstOrNull { it.value == path }?.let { return it.key }
-        return File(path).name.ifBlank { "Storage" }
+        return matchStorageRoot(path)?.key ?: File(path).name.ifBlank { "Storage" }
     }
 
     fun toggleSelection(path: String) {
@@ -331,16 +326,14 @@ object FileManager {
     }
 
     fun findSharedLocation(realPath: String): Pair<String, String>? {
-        val (label, rootPath) = storageRoots.entries
-            .firstOrNull { (_, root) -> realPath == root || realPath.startsWith("$root/") }
-            ?: return null
-        val relativePath = realPath.removePrefix(rootPath).trimStart('/')
-        return label to relativePath
+        val entry = matchStorageRoot(realPath) ?: return null
+        val relativePath = realPath.removePrefix(entry.value).trimStart('/')
+        return entry.key to relativePath
     }
 
     fun urlSafeSegment(segment: String): String {
         return segment
-            .replace("%", "%25")  // must come first, or this would double-encode the others
+            .replace("%", "%25")
             .replace("#", "%23")
             .replace("?", "%3F")
             .replace("&", "%26")

@@ -131,6 +131,10 @@ class AppControl(application: Application) : androidx.lifecycle.AndroidViewModel
     val allowedNetworks get() = NetworkManager.allowedNetworks
     val blockedNetworks get() = NetworkManager.blockedNetworks
 
+    fun loadNetworkList(context: Context) {
+        NetworkManager.load(context)
+    }
+
     fun allowNetwork(context: Context, ssid: String) {
         NetworkManager.allow(context, ssid)
     }

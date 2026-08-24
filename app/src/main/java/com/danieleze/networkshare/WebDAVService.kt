@@ -90,18 +90,18 @@ class WebDAVService : Service(), TransferListener,
         networkState.value = state
         when (state) {
             NetworkState.TRUSTED -> {
-                if (activeServers.isNotEmpty()) restoreSharingNotification(this)
+                if (isRunning) restoreSharingNotification(this)
             }
 
             NetworkState.NO_NETWORK -> {
-                if (activeServers.isNotEmpty()) showNoNetworkNotification(this)
+                if (isRunning) showNoNetworkNotification(this)
                 broadcastCurrentAddresses()
             }
 
             NetworkState.UNTRUSTED -> {
                 when (NetworkManager.getTrust(ssid)) {
                     NetworkManager.Trust.BLOCKED -> showBlockedNetworkNotification(this)
-                    else -> if (activeServers.isNotEmpty()) showNoNetworkNotification(this)
+                    else -> if (isRunning) showNoNetworkNotification(this)
                 }
             }
         }
