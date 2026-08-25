@@ -91,14 +91,17 @@ class WebDAVService : Service(), TransferListener,
         when (state) {
             NetworkState.TRUSTED -> {
                 if (isRunning) restoreSharingNotification(this)
+                wsDiscoveryService.start()
             }
 
             NetworkState.NO_NETWORK -> {
                 if (isRunning) showNoNetworkNotification(this)
+                wsDiscoveryService.stop()
                 broadcastCurrentAddresses()
             }
 
             NetworkState.UNTRUSTED -> {
+                wsDiscoveryService.stop()
                 when (NetworkManager.getTrust(ssid)) {
                     NetworkManager.Trust.BLOCKED -> showBlockedNetworkNotification(this)
                     else -> if (isRunning) showNoNetworkNotification(this)
@@ -292,7 +295,6 @@ class WebDAVService : Service(), TransferListener,
         NetworkManager.refreshAll(this, currentSsid, wifiJustEnabled) { wifiJustEnabled = false }
 
         FileManager.refreshStorageRoots(this)
-        wsDiscoveryService.start()
 
         val addresses = NetworkManager.getAllLocalIpAddresses()
         if (addresses.size > 1) {
