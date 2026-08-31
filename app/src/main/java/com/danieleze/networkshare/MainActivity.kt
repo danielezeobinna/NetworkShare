@@ -37,7 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.graphics.toColorInt
 import androidx.core.view.WindowCompat
-import com.danieleze.networkshare.AppControl.Companion.isUnlocked
+import com.danieleze.networkshare.ViewModel.Companion.isUnlocked
 import com.danieleze.networkshare.ui.theme.AppTheme
 import com.danieleze.networkshare.ui.theme.NetworkShareTheme
 import com.danieleze.networkshare.ui.screens.DiscoveryScreen
@@ -65,7 +65,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         private const val REQ_PIN = 9999
     }
 
-    val viewModel: AppControl by viewModels()
+    val viewModel: ViewModel by viewModels()
 
     // ── Private fields ────────────────────────────────────────────────────────
     private var pausedAtTime = 0L
@@ -176,7 +176,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         instance = null
         super.onCreate(savedInstanceState)
         instance = this
-        Log.d("AppControl", "STARTED — app opened")
+        Log.d("ViewModel", "STARTED — app opened")
 
         if (savedInstanceState == null) isUnlocked = false
 
@@ -692,7 +692,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         if (instance == this) {
             instance = null
         }
-        Log.d("AppControl", "STOPPED — app closed")
+        Log.d("ViewModel", "STOPPED — app closed")
         permHandler.removeCallbacks(heartbeat)
         super.onDestroy()
     }

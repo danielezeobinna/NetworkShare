@@ -4,6 +4,7 @@ import android.app.*
 import android.content.Context
 import android.content.Intent
 import android.os.IBinder
+import android.content.BroadcastReceiver
 import android.util.Log
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.graphics.toColorInt
@@ -22,6 +23,19 @@ import com.danieleze.networkshare.NetworkManager.ACTION_ALLOW_ONCE
 import com.danieleze.networkshare.NetworkManager.ACTION_BLOCK
 import com.danieleze.networkshare.NetworkManager.CHANNEL_ID
 import com.danieleze.networkshare.NetworkManager.EXTRA_SSID
+
+class BootReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == Intent.ACTION_BOOT_COMPLETED ||
+            intent.action == "android.intent.action.QUICKBOOT_POWERON") {
+
+            WebDAVService.loadPaths(context)
+
+            val serviceIntent = Intent(context, WebDAVService::class.java)
+            context.startForegroundService(serviceIntent)
+        }
+    }
+}
 
 class WebDAVService : Service(), TransferListener,
     NetworkManager.NetworkEventListener, WebDAVServerConfig {
@@ -301,7 +315,7 @@ class WebDAVService : Service(), TransferListener,
             showMultipleNetworksWarning()
         }
 
-        val ip = addresses.firstOrNull()
+        val ip = NetworkManager.getLocalIpAddress()
         if (ip == null) {
             Log.w(tag, "No IP address available — server not started")
             isStartingServers = false
@@ -669,35 +683,33 @@ class WebDAVService : Service(), TransferListener,
         var isAuthEnabled = mutableStateOf(false)
         var isNetworkTrusted = mutableStateOf(false)
         var pendingTrustSsid = mutableStateOf<String?>(null)
-        var username = mutableStateOf(Build.MODEL)
+        var username = mutableStateOf(sanitizeHostnameSegment(Build.MODEL))
         var password = mutableStateOf("pass")
         var useFallbackAddress = mutableStateOf(false)
         val activeServers = mutableListOf<WebDAVServer>()
 
+        private fun sanitizeHostnameSegment(raw: String): String {
+            return raw
+                .trim()
+                .replace(Regex("\\s+"), "-")
+                .filter { it.isLetterOrDigit() || it == '-' }
+                .trim('-')
+                .ifEmpty { "device" }
+        }
+
         val friendlyServerAddress: String
             get() {
                 val server = activeServers.firstOrNull() ?: return "http://0.0.0.0:8080"
-                val sanitizedHostname = username.value
-                    .lowercase()
-                    .filter { it.isLetterOrDigit() || it == '-' }
-                    .trim('-')
-                    .ifEmpty { "device" }
-                return "${server.scheme}://$sanitizedHostname:${server.port}"
+                return "${server.scheme}://${username.value.lowercase()}:${server.port}"
             }
 
         fun baseAddressForPort(port: Int): String {
-            val server =
-                activeServers.firstOrNull { it.port == port } ?: activeServers.firstOrNull()
+            val server = activeServers.firstOrNull { it.port == port } ?: activeServers.firstOrNull()
             val scheme = server?.scheme ?: "http"
             return if (useFallbackAddress.value) {
                 "$scheme://${server?.boundIp ?: "0.0.0.0"}:$port"
             } else {
-                val sanitizedHostname = username.value
-                    .lowercase()
-                    .filter { it.isLetterOrDigit() || it == '-' }
-                    .trim('-')
-                    .ifEmpty { "device" }
-                "$scheme://$sanitizedHostname:$port"
+                friendlyServerAddress
             }
         }
 
@@ -733,31 +745,17 @@ class WebDAVService : Service(), TransferListener,
         fun loadPaths(context: Context) {
             val prefs = context.getSharedPreferences("network_share_prefs", MODE_PRIVATE)
             isAuthEnabled.value = prefs.getBoolean("auth_enabled", true)
-            username.value = prefs.getString("username", Build.MODEL) ?: Build.MODEL
+            username.value = sanitizeHostnameSegment(prefs.getString("username", Build.MODEL) ?: Build.MODEL)
             password.value = prefs.getString("password", "pass") ?: "pass"
             useFallbackAddress.value = prefs.getBoolean("use_fallback_address", false)
             val saved = prefs.getStringSet("shared_paths", null)
-            FileManager.selectedPaths.clear()
-            if (saved != null) {
-                FileManager.selectedPaths.addAll(saved)
-            } else {
-                val internalRoot = android.os.Environment.getExternalStorageDirectory()
-                val defaultFolderNames = listOf(
-                    "DCIM", "Documents", "Download",
-                    "Movies", "Music", "NetworkShare", "Pictures"
-                )
-                val defaults = defaultFolderNames
-                    .map { File(internalRoot, it) }
-                    .filter { it.exists() && it.isDirectory }
-                    .map { it.absolutePath }
-                FileManager.selectedPaths.addAll(defaults)
-                savePaths(context)
-            }
+            val usedDefaults = FileManager.applySelectedPaths(saved)
+            if (usedDefaults) savePaths(context)
         }
     }
 }
 
-class TransferCancelReceiver : android.content.BroadcastReceiver() {
+class TransferCancelReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val fileName = intent.getStringExtra("file_name") ?: return
         WebDAVService.cancelTransfer(fileName)

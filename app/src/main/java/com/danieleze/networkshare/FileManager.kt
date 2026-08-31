@@ -23,6 +23,16 @@ object FileManager {
     var tempPriorityPath: String? = null
     var storageRoots = mutableMapOf<String, String>()
 
+    private val serverIniContent = """
+    [ViewState]
+    Mode=
+    Vid=
+    FolderType=Generic
+    [.ShellClassInfo]
+    InfoTip=Contains files and folders that are shared to your network
+    IconResource=%SystemRoot%\System32\imageres.dll,42
+""".trimIndent()
+
     private val storageLabelIniContent = """
     [ViewState]
     Mode=
@@ -31,9 +41,17 @@ object FileManager {
     [.ShellClassInfo]
     IconResource=C:\Windows\System32\SHELL32.dll,8
 """.trimIndent()
+    private val knownSystemDirTypes = listOf(
+        Environment.DIRECTORY_DCIM,
+        Environment.DIRECTORY_DOCUMENTS,
+        Environment.DIRECTORY_DOWNLOADS,
+        Environment.DIRECTORY_MOVIES,
+        Environment.DIRECTORY_MUSIC,
+        Environment.DIRECTORY_PICTURES
+    )
     private val desktopIniContent: Map<String, String> by lazy {
-        mapOf(
-            Environment.DIRECTORY_DCIM to """
+        val contents = listOf(
+            """
         [ViewState]
         Mode=
         Vid=
@@ -42,7 +60,7 @@ object FileManager {
         InfoTip=Contains photos and footage taken by the camera
         IconResource=C:\Windows\System32\SHELL32.dll,117
     """.trimIndent(),
-            Environment.DIRECTORY_DOCUMENTS to """
+            """
         [ViewState]
         Mode=
         Vid=
@@ -50,7 +68,7 @@ object FileManager {
         [.ShellClassInfo]
         IconResource=C:\WINDOWS\System32\imageres.dll,85
     """.trimIndent(),
-            Environment.DIRECTORY_DOWNLOADS to """
+            """
         [ViewState]
         Mode=
         Vid=
@@ -59,7 +77,7 @@ object FileManager {
         InfoTip=Contains downloaded files and folders
         IconResource=%SystemRoot%\system32\imageres.dll,-184
     """.trimIndent(),
-            Environment.DIRECTORY_MOVIES to """
+            """
         [ViewState]
         Mode=
         Vid=
@@ -68,7 +86,7 @@ object FileManager {
         InfoTip=@%SystemRoot%\system32\shell32.dll,-12690
         IconResource=C:\WINDOWS\System32\imageres.dll,18
     """.trimIndent(),
-            Environment.DIRECTORY_MUSIC to """
+            """
         [ViewState]
         Mode=
         Vid=
@@ -77,7 +95,7 @@ object FileManager {
         InfoTip=@%SystemRoot%\system32\shell32.dll,-12689
         IconResource=C:\WINDOWS\System32\imageres.dll,103
     """.trimIndent(),
-            Environment.DIRECTORY_PICTURES to """
+            """
         [ViewState]
         Mode=
         Vid=
@@ -86,7 +104,10 @@ object FileManager {
         InfoTip=@%SystemRoot%\system32\shell32.dll,-12688
         IconResource=C:\WINDOWS\System32\imageres.dll,108
     """.trimIndent()
-        ).mapKeys { (type, _) -> Environment.getExternalStoragePublicDirectory(type).name }
+        )
+
+        knownSystemDirTypes.zip(contents)
+            .associate { (type, content) -> Environment.getExternalStoragePublicDirectory(type).name to content }
     }
     private var mediaReceiver: android.content.BroadcastReceiver? = null
 
@@ -186,6 +207,10 @@ object FileManager {
         if (clean.isEmpty()) {
             syncVirtualRoot()
             return virtualRootDir
+        }
+
+        if (clean.equals("desktop.ini", ignoreCase = true)) {
+            return desktopIniFile("server_root", serverIniContent) ?: 404
         }
 
         val slashIndex = clean.indexOf('/')
@@ -337,5 +362,23 @@ object FileManager {
             .replace("#", "%23")
             .replace("?", "%3F")
             .replace("&", "%26")
+    }
+
+    fun applySelectedPaths(saved: Set<String>?): Boolean {
+        selectedPaths.clear()
+        return if (saved != null) {
+            selectedPaths.addAll(saved)
+            false
+        } else {
+            selectedPaths.addAll(defaultSharedPaths())
+            true
+        }
+    }
+
+    private fun defaultSharedPaths(): List<String> {
+        return knownSystemDirTypes
+            .map { Environment.getExternalStoragePublicDirectory(it) }
+            .filter { it.exists() && it.isDirectory }
+            .map { it.absolutePath }
     }
 }

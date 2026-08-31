@@ -9,7 +9,7 @@ import androidx.core.content.edit
 import com.danieleze.networkshare.ui.theme.AppTheme
 import java.io.File
 
-class AppControl(application: Application) : androidx.lifecycle.AndroidViewModel(application) {
+class ViewModel(application: Application) : androidx.lifecycle.AndroidViewModel(application) {
 
     companion object {
         var isUnlocked by mutableStateOf(false)
