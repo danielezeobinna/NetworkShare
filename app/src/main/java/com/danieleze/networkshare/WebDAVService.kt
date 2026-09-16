@@ -17,12 +17,7 @@ import java.util.Collections
 import android.os.Build
 import android.app.NotificationChannel
 import android.app.PendingIntent
-import fi.iki.elonen.NanoHTTPD
-import com.danieleze.networkshare.NetworkManager.ACTION_ALLOW
-import com.danieleze.networkshare.NetworkManager.ACTION_ALLOW_ONCE
-import com.danieleze.networkshare.NetworkManager.ACTION_BLOCK
 import com.danieleze.networkshare.NetworkManager.CHANNEL_ID
-import com.danieleze.networkshare.NetworkManager.EXTRA_SSID
 
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -49,18 +44,20 @@ class WebDAVService : Service(), TransferListener,
     private val safetyChannelId = "WebDAV_Safety_Alerts"
     private val wsDiscoveryService = WSDiscoveryService(
         context = this,
-        friendlyName = getUsername()
+        friendlyName = username.value
     )
     // ── NetworkEventListener implementation ──────────────────
     // NetworkManager calls these when network state changes.
 
-    override fun getUsername(): String = username.value
-    override fun getPassword() = password.value
-    override fun isAuthEnabled() = isAuthEnabled.value
+    override fun getAuthInfo(key: String): Any? = when (key) {
+        "username" -> username.value
+        "password" -> password.value
+        "enabled" -> isAuthEnabled.value
+        "token" -> generateToken()
+        else -> null
+    }
     override fun getIpAddress(): String? = NetworkManager.getLocalIpAddress()
-    override fun isCancelled(fileName: String) = WebDAVService.isCancelled(fileName)
-    override fun clearCancel(fileName: String) = WebDAVService.clearCancel(fileName)
-    override fun generateToken() = WebDAVService.generateToken()
+    override fun cancelTransfer(fileName: String) = WebDAVService.cancelTransfer(fileName)
     override fun showSafetyAlert(fileName: String) = postSafetyAlert(fileName)
 
     override fun getObjects(uri: String): Any? {
@@ -68,38 +65,8 @@ class WebDAVService : Service(), TransferListener,
         return FileManager.getObjects(uri)
     }
 
-    override fun getCustomResponse(uri: String, uncPath: String): NanoHTTPD.Response? {
-        val fileName = uri.trimEnd('/').substringAfterLast('/')
-        return when (fileName) {
-            "ic_ns.png" -> {
-                try {
-                    val stream = assets.open("ic_ns.png")
-                    NanoHTTPD.newChunkedResponse(
-                        NanoHTTPD.Response.Status.OK,
-                        "image/png",
-                        stream
-                    )
-                } catch (_: Exception) {
-                    null
-                }
-            }
-
-            else -> null
-        }
-    }
-
-    override fun getDirectoryHtml(uncPath: String): String? {
-        return try {
-            assets.open("browser_instructions.html")
-                .bufferedReader()
-                .readText()
-                .replace("{{UNC_PATH}}", uncPath)
-        } catch (_: Exception) {
-            null
-        }
-    }
-
     override fun onNetworkTrustChanged(state: NetworkState, ssid: String) {
+        val wasTrusted = networkState.value == NetworkState.TRUSTED
         isNetworkTrusted.value = state == NetworkState.TRUSTED
         networkState.value = state
         when (state) {
@@ -109,7 +76,7 @@ class WebDAVService : Service(), TransferListener,
             }
 
             NetworkState.NO_NETWORK -> {
-                if (isRunning) showNoNetworkNotification(this)
+                if (isRunning) getSystemService(NotificationManager::class.java)?.notify(1, defaultNotification(continuing = wasTrusted))
                 wsDiscoveryService.stop()
                 broadcastCurrentAddresses()
             }
@@ -118,7 +85,7 @@ class WebDAVService : Service(), TransferListener,
                 wsDiscoveryService.stop()
                 when (NetworkManager.getTrust(ssid)) {
                     NetworkManager.Trust.BLOCKED -> showBlockedNetworkNotification(this)
-                    else -> if (isRunning) showNoNetworkNotification(this)
+                    else -> if (isRunning) getSystemService(NotificationManager::class.java)?.notify(1, defaultNotification(continuing = wasTrusted))
                 }
             }
         }
@@ -188,29 +155,7 @@ class WebDAVService : Service(), TransferListener,
         createNotificationChannel()
         ensureChannel(getSystemService(NotificationManager::class.java))
 
-        val contentIntent = Intent(this, MainActivity::class.java).apply {
-            setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        }
-        val contentPendingIntent = PendingIntent.getActivity(
-            this, 1, contentIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-
-        val stopIntent = Intent(this, WebDAVService::class.java).apply { action = "STOP_SERVICE" }
-        val stopPendingIntent = PendingIntent.getService(
-            this, 0, stopIntent, PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val notification = NotificationCompat.Builder(this, channelId)
-            .setSmallIcon(R.drawable.ic_stat_name)
-            .setContentTitle("Network sharing is turned on")
-            .setContentText("Your phone can be accessed by other devices on this network")
-            .setOngoing(true)
-            .setColor("#2BAED5".toColorInt())
-            .setContentIntent(contentPendingIntent)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "TURN OFF", stopPendingIntent)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
+        val notification = defaultNotification()
 
         NetworkManager.registerHardwareReceiver(this)
         FileManager.registerMediaReceiver(this)
@@ -409,139 +354,77 @@ class WebDAVService : Service(), TransferListener,
 
     // ── Notifications ─────────────────────────────────────────
 
-    fun showTrustNotification(context: Context, ssid: String, silent: Boolean = false) {
-        val manager = context.getSystemService(NotificationManager::class.java)
-        ensureChannel(manager)
+    private fun defaultNotification(continuing: Boolean = false): Notification = buildServiceNotification(
+        title = "Network sharing is off",
+        text = if (continuing)
+            "No network available. Connect or create a network to continue sharing."
+        else
+            "No network available. Connect or create a network to start sharing.",
+        silent = true,
+        trusted = false
+    )
 
-        fun pendingFor(action: String): PendingIntent {
-            val i = Intent(context, NetworkActionReceiver::class.java).apply {
-                this.action = action
-                putExtra(EXTRA_SSID, ssid)
-            }
-            return PendingIntent.getBroadcast(
-                context,
-                ssid.hashCode() xor action.hashCode(),
-                i,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-        }
-
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_stat_name)
-            .setContentTitle("Unknown Network Detected")
-            .setContentText("\"$ssid\" is unknown. Allow file sharing on this network?")
-            .setShowWhen(false)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_STATUS)
-            .setOngoing(true)
-            .setColor("#2BAED5".toColorInt())
-            .setAutoCancel(false)
-            .also { if (silent) it.setSilent(true) }
-            .addAction(0, "Allow", pendingFor(ACTION_ALLOW))
-            .addAction(0, "Allow Once", pendingFor(ACTION_ALLOW_ONCE))
-            .addAction(0, "Block", pendingFor(ACTION_BLOCK))
-            .build()
-
-        manager?.notify(1, notification)
-    }
-
-    fun showNoNetworkNotification(context: Context) {
-        val manager = context.getSystemService(NotificationManager::class.java)
-
-        val contentIntent = Intent(context, MainActivity::class.java).apply {
+    private fun buildServiceNotification(
+        title: String,
+        text: String,
+        silent: Boolean,
+        trusted: Boolean
+    ): Notification {
+        val contentIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
         val contentPendingIntent = PendingIntent.getActivity(
-            context, 1, contentIntent,
+            this, 1, contentIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
-        val stopIntent =
-            Intent(context, WebDAVService::class.java).apply { action = "STOP_SERVICE" }
+        val stopIntent = Intent(this, WebDAVService::class.java).apply { action = "STOP_SERVICE" }
         val stopPendingIntent = PendingIntent.getService(
-            context, 0, stopIntent, PendingIntent.FLAG_IMMUTABLE
+            this, 0, stopIntent, PendingIntent.FLAG_IMMUTABLE
         )
 
-        val notification = NotificationCompat.Builder(context, "WebDAV_Service_Channel")
+        return NotificationCompat.Builder(this, channelId)
             .setSmallIcon(R.drawable.ic_stat_name)
-            .setColor(android.graphics.Color.GRAY)
-            .setContentTitle("Network sharing is turned on")
-            .setContentText("No network available. Connect or create a network to start sharing.")
+            .setContentTitle(title)
+            .setContentText(text)
             .setOngoing(true)
-            .setSilent(true)
             .setShowWhen(false)
+            .setColor(if (trusted) "#2BAED5".toColorInt() else android.graphics.Color.GRAY)
             .setContentIntent(contentPendingIntent)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "TURN OFF", stopPendingIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setSilent(silent)
             .build()
+    }
 
-        manager?.notify(1, notification)
+    fun showTrustNotification(context: Context, ssid: String, silent: Boolean = false) {
+        val manager = context.getSystemService(NotificationManager::class.java)
+        manager?.notify(1, buildServiceNotification(
+            title = "Network sharing is off",
+            text = "\"$ssid\" is unknown. Open the app to decide whether to allow it.",
+            silent = silent,
+            trusted = false
+        ))
     }
 
     fun showBlockedNetworkNotification(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java)
-
-        val contentIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
-        }
-        val contentPendingIntent = PendingIntent.getActivity(
-            context, 1, contentIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-
-        val stopIntent =
-            Intent(context, WebDAVService::class.java).apply { action = "STOP_SERVICE" }
-        val stopPendingIntent = PendingIntent.getService(
-            context, 0, stopIntent, PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val notification = NotificationCompat.Builder(context, "WebDAV_Service_Channel")
-            .setSmallIcon(R.drawable.ic_stat_name)
-            .setColor(android.graphics.Color.GRAY)
-            .setContentTitle("Network sharing is turned on")
-            .setContentText("This is a blocked network. Allow this network or connect to a trusted network to start sharing.")
-            .setOngoing(true)
-            .setSilent(true)
-            .setShowWhen(false)
-            .setContentIntent(contentPendingIntent)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "TURN OFF", stopPendingIntent)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
-
-        manager?.notify(1, notification)
+        manager?.notify(1, buildServiceNotification(
+            title = "Network sharing is off",
+            text = "This network is blocked. Open the app to manage trusted networks.",
+            silent = true,
+            trusted = false
+        ))
     }
 
     fun restoreSharingNotification(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java)
-
-        val contentIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
-        }
-        val contentPendingIntent = PendingIntent.getActivity(
-            context, 1, contentIntent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-
-        val stopIntent =
-            Intent(context, WebDAVService::class.java).apply { action = "STOP_SERVICE" }
-        val stopPendingIntent = PendingIntent.getService(
-            context, 0, stopIntent, PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val notification = NotificationCompat.Builder(context, "WebDAV_Service_Channel")
-            .setSmallIcon(R.drawable.ic_stat_name)
-            .setContentTitle("Network sharing is turned on")
-            .setContentText("Your phone can be accessed by other devices on this network")
-            .setShowWhen(false)
-            .setOngoing(true)
-            .setColor("#2BAED5".toColorInt())
-            .setContentIntent(contentPendingIntent)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "TURN OFF", stopPendingIntent)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setSilent(true)
-            .build()
-
-        manager?.notify(1, notification)
+        manager?.notify(1, buildServiceNotification(
+            title = "Network sharing is on",
+            text = "Your phone can be accessed by other devices on this network",
+            silent = true,
+            trusted = true
+        ))
     }
 
     fun ensureChannel(manager: NotificationManager?) {
@@ -715,13 +598,12 @@ class WebDAVService : Service(), TransferListener,
 
         private val cancelledFiles = Collections.synchronizedSet(mutableSetOf<String>())
 
-        fun cancelTransfer(fileName: String) {
+        fun requestCancel(fileName: String) {
             cancelledFiles.add(fileName)
         }
 
-        fun isCancelled(fileName: String): Boolean = cancelledFiles.contains(fileName)
-        fun clearCancel(fileName: String) {
-            cancelledFiles.remove(fileName)
+        fun cancelTransfer(fileName: String): Boolean {
+            return cancelledFiles.remove(fileName)
         }
 
         fun generateToken(): String {
@@ -758,7 +640,7 @@ class WebDAVService : Service(), TransferListener,
 class TransferCancelReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val fileName = intent.getStringExtra("file_name") ?: return
-        WebDAVService.cancelTransfer(fileName)
+        WebDAVService.requestCancel(fileName)
     }
 }
 

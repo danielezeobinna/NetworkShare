@@ -23,6 +23,7 @@ object FileManager {
     var tempPriorityPath: String? = null
     var storageRoots = mutableMapOf<String, String>()
 
+    private var appContext: Context? = null
     private val serverIniContent = """
     [ViewState]
     Mode=
@@ -112,6 +113,7 @@ object FileManager {
     private var mediaReceiver: android.content.BroadcastReceiver? = null
 
     fun registerMediaReceiver(context: Context) {
+        appContext = context.applicationContext
         if (mediaReceiver != null) return
 
         mediaReceiver = object : android.content.BroadcastReceiver() {
@@ -158,6 +160,40 @@ object FileManager {
             }
         }
         return iniFile
+    }
+
+    private fun appIconFile(): File? {
+        val context = appContext ?: return null
+        val cacheDir = File(System.getProperty("java.io.tmpdir"), "virtual_assets")
+        if (!cacheDir.exists()) cacheDir.mkdirs()
+        val iconFile = File(cacheDir, "ic_ns.png")
+        if (!iconFile.exists()) {
+            try {
+                context.assets.open("ic_ns.png").use { input ->
+                    iconFile.outputStream().use { output -> input.copyTo(output) }
+                }
+            } catch (_: Exception) {
+                return null
+            }
+        }
+        return iconFile
+    }
+
+    private fun browserInstructionsFile(): File? {
+        val context = appContext ?: return null
+        val cacheDir = File(System.getProperty("java.io.tmpdir"), "virtual_assets")
+        if (!cacheDir.exists()) cacheDir.mkdirs()
+        val htmlFile = File(cacheDir, "browser_instructions.html")
+        if (!htmlFile.exists()) {
+            try {
+                context.assets.open("browser_instructions.html").use { input ->
+                    htmlFile.outputStream().use { output -> input.copyTo(output) }
+                }
+            } catch (_: Exception) {
+                return null
+            }
+        }
+        return htmlFile
     }
 
     fun clearVirtualDesktopIniCache() {
@@ -213,6 +249,14 @@ object FileManager {
             return desktopIniFile("server_root", serverIniContent) ?: 404
         }
 
+        if (clean.equals("ic_ns.png", ignoreCase = true)) {
+            return appIconFile() ?: 404
+        }
+
+        if (clean.equals("browser_instructions.html", ignoreCase = true)) {
+            return browserInstructionsFile() ?: 404
+        }
+
         val slashIndex = clean.indexOf('/')
         val label = if (slashIndex == -1) clean else clean.take(slashIndex)
         val rest = if (slashIndex == -1) "" else clean.substring(slashIndex + 1)
@@ -220,6 +264,10 @@ object FileManager {
         val rootPath = storageRoots[label] ?: return null
         val file = if (rest.isEmpty()) File(rootPath) else File(rootPath, rest)
         val absPath = file.absolutePath
+
+        if (file.name.equals("ic_ns.png", ignoreCase = true) && !file.exists()) {
+            return appIconFile() ?: 404
+        }
 
         if (file.name.equals("desktop.ini", ignoreCase = true) && !file.exists()) {
             if (rest == "desktop.ini") {
@@ -344,7 +392,9 @@ object FileManager {
         }
         android.util.Log.d(
             "FileManager",
-            "resolveRealPath failed. scheme=${uri.scheme}, authority=${uri.authority}, uri=$uri"
+            "resolveRealPath failed. scheme=${uri.scheme}, authority=${uri.authority}, " +
+                    "uri=$uri, isDocumentUri=${android.provider.DocumentsContract.isDocumentUri(context, uri)}, " +
+                    "pathSegments=${uri.pathSegments}"
         )
         if (uri.scheme == "file") return uri.path
         return null

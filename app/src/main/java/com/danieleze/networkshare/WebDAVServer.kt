@@ -354,18 +354,12 @@ abstract class FastHTTPD(
 }
 
 interface WebDAVServerConfig {
-    fun getUsername(): String
-    fun getPassword(): String
-    fun isAuthEnabled(): Boolean
-    fun isCancelled(fileName: String): Boolean
-    fun clearCancel(fileName: String)
-    fun generateToken(): String
+    fun getAuthInfo(key: String): Any?
+    fun cancelTransfer(fileName: String): Boolean
     fun showSafetyAlert(fileName: String)
     fun getObjects(uri: String): Any?
     fun getIpAddress(): String?
     fun getPort(): Int? = null
-    fun getCustomResponse(uri: String, uncPath: String): NanoHTTPD.Response? = null
-    fun getDirectoryHtml(uncPath: String): String? = null
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -389,7 +383,9 @@ class WebDAVServer private constructor(
     private val tag = "WebDAVServer:$port"
 
     init {
-        DigestAuthManager.setCredentials(config.getUsername(), config.getPassword())
+        val user = config.getAuthInfo("username") as? String ?: ""
+        val pass = config.getAuthInfo("password") as? String ?: ""
+        DigestAuthManager.setCredentials(user, pass)
     }
 
     companion object {
@@ -449,19 +445,17 @@ class WebDAVServer private constructor(
             )
         }
 
-        val customResponse = config.getCustomResponse(session.uri, "")
-        if (customResponse != null) return customResponse
-
         // OPTIONS must always pass unauthenticated – Windows probes this first
         // before it even has credentials to send.
-        if (session.method != Method.OPTIONS && config.isAuthEnabled()) {
+        val authEnabled = config.getAuthInfo("enabled") as? Boolean ?: false
+        if (session.method != Method.OPTIONS && authEnabled) {
             val sessionKey = "${session.remoteIpAddress}|${session.headers["user-agent"]}"
             val authHeader = session.headers["authorization"] ?: ""
 
             // Token bypass — read-only operations only (streaming/download via URL)
             val tokenParam = session.parameters["token"]?.firstOrNull()
             val isValidToken = !tokenParam.isNullOrBlank() &&
-                    tokenParam == config.generateToken()
+                    tokenParam == config.getAuthInfo("token") as? String
             val isReadOnly = session.method == Method.GET ||
                     session.method == Method.HEAD
 
@@ -616,8 +610,7 @@ class WebDAVServer private constructor(
                 var lastUpdateTime = 0L
 
                 while (totalRead < contentLength) {
-                    if (config.isCancelled(target.name)) {
-                        config.clearCancel(target.name)
+                    if (config.cancelTransfer(target.name)) {
                         tempFile.delete()
                         // Lock stays active — original file is protected.
                         return newFixedLengthResponse(
@@ -885,7 +878,9 @@ class WebDAVServer private constructor(
                 else uriPath.replace('/', '\\')
                 val uncFull = "$uncBase$uncSubPath"
 
-                val customHtml = config.getDirectoryHtml(uncFull)
+                val templateFile = config.getObjects("browser_instructions.html") as? File
+                val customHtml = templateFile?.takeIf { it.exists() }?.readText()
+                    ?.replace("{{UNC_PATH}}", uncFull)
                 return if (customHtml != null) {
                     newFixedLengthResponse(
                         Response.Status.FORBIDDEN, "text/html; charset=utf-8", customHtml
@@ -925,8 +920,7 @@ class WebDAVServer private constructor(
                 var lastUpdateTime = 0L
 
                 override fun read(b: ByteArray, off: Int, len: Int): Int {
-                    if (config.isCancelled(target.name)) {
-                        config.clearCancel(target.name)
+                    if (config.cancelTransfer(target.name)) {
                         throw IOException("Transfer cancelled by user")
                     }
                     val maxToRead = min(len.toLong(), dataToDeliver - totalBytesRead).toInt()
