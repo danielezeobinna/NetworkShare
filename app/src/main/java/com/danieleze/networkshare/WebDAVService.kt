@@ -473,7 +473,7 @@ class WebDAVService : Service(), TransferListener,
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setColor("#2BAED5".toColorInt())
             .setAutoCancel(true)
-            .setTimeoutAfter(60000)
+            .setTimeoutAfter(25000)
             .setContentIntent(pendingIntent)
 
         val manager = getSystemService(NotificationManager::class.java)

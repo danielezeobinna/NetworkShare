@@ -40,7 +40,7 @@ private object PersistenceGuard {
 
         if (lastTime == 0L) return true
 
-        val isExpired = (System.currentTimeMillis() - lastTime) > 60000
+        val isExpired = (System.currentTimeMillis() - lastTime) > 25000
         return isVerified || isExpired
     }
 
@@ -55,6 +55,13 @@ private object PersistenceGuard {
     // Force clears the lock regardless of timer — only use for failed/0-byte uploads
     fun forceRelease(context: Context, path: String) {
         clear(context, path)
+    }
+}
+
+private object WebDAVStatus {
+    val LOCKED: NanoHTTPD.Response.IStatus = object : NanoHTTPD.Response.IStatus {
+        override fun getRequestStatus(): Int = 423
+        override fun getDescription(): String = "423 Locked"
     }
 }
 
@@ -578,18 +585,9 @@ class WebDAVServer private constructor(
     }
 
     private fun handlePut(session: IHTTPSession, target: File): Response {
-        val tempFile = File(uploadCacheDir, ".~${UUID.randomUUID()}.tmp")
+        val tempFile = uploadTempFileFor(target)
         val sessionKey = "${session.remoteIpAddress}|${session.headers["user-agent"]}"
         val isReplace = target.exists() && target.length() > 0L
-
-        if (isReplace && !PersistenceGuard.isSafeToDelete(context, target.absolutePath)) {
-            Log.w(tag, "Safety Lock Active: Blocking PUT (replace) for ${target.name}")
-            return newFixedLengthResponse(
-                Response.Status.FORBIDDEN,
-                MIME_PLAINTEXT,
-                "Safety Lock Active"
-            )
-        }
 
         return try {
             target.parentFile?.mkdirs()
@@ -799,18 +797,19 @@ class WebDAVServer private constructor(
         }
     }
 
-
     private fun handleDelete(target: File): Response {
         val path = target.absolutePath
         if (target.isFile) {
             if (!PersistenceGuard.isSafeToDelete(context, path)) {
                 config.showSafetyAlert(target.name)
                 Log.w(tag, "Safety Lock Active: Blocking DELETE for ${target.name}")
-                return newFixedLengthResponse(
-                    Response.Status.FORBIDDEN,
+                val res = newFixedLengthResponse(
+                    WebDAVStatus.LOCKED,
                     MIME_PLAINTEXT,
-                    "Safety Lock Active"
+                    "Locked"
                 )
+                res.addHeader("Retry-After", "3")
+                return res
             }
         }
 
@@ -1101,8 +1100,10 @@ class WebDAVServer private constructor(
     """.trimIndent()
     }
 
-    private val uploadCacheDir: File by lazy {
-        File(context.cacheDir, "webdav_uploads").apply { mkdirs() }
+    private fun uploadTempFileFor(target: File): File {
+        val dir = target.parentFile ?: context.cacheDir
+        dir.mkdirs()
+        return File(dir, ".~${UUID.randomUUID()}.tmp")
     }
 
     private fun moveTempToTarget(tempFile: File, target: File): Boolean {
