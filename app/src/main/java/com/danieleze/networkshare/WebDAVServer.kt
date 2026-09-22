@@ -105,7 +105,10 @@ private object PropertyStore {
                 removedCount++
             }
         }
-        Log.d("PropertyStore", "Cleanup: removed $removedCount stale entries out of ${allPaths.size}")
+        Log.d(
+            "PropertyStore",
+            "Cleanup: removed $removedCount stale entries out of ${allPaths.size}"
+        )
     }
 }
 
@@ -1084,18 +1087,47 @@ class WebDAVServer private constructor(
             timeZone = TimeZone.getTimeZone("GMT")
         }
 
-        val attributesXml = saved["Z:Win32FileAttributes"]
+        val rawAttributesXml = saved["Z:Win32FileAttributes"]
             ?: "<Z:Win32FileAttributes>$computedAttributes</Z:Win32FileAttributes>"
+
+        val attributesXml = if (isDir && hasDesktopIni) {
+            val currentAttrValue = rawAttributesXml.substringAfter(">").substringBefore("<")
+            val currentAttrInt = try {
+                currentAttrValue.removePrefix("0x").toLong(16)
+            } catch (_: Exception) {
+                null
+            }
+            if (currentAttrInt == 0x00000010L) {
+                "<Z:Win32FileAttributes>0x00000001</Z:Win32FileAttributes>"
+            } else {
+                rawAttributesXml
+            }
+        } else {
+            rawAttributesXml
+        }
 
         val lastModifiedDate = saved["Z:Win32LastModifiedTime"]
             ?.substringAfter(">")?.substringBefore("<")
-            ?.let { raw -> try { sdf.parse(raw) } catch (_: Exception) { null } }
+            ?.let { raw ->
+                try {
+                    sdf.parse(raw)
+                } catch (_: Exception) {
+                    null
+                }
+            }
             ?: Date(file.lastModified())
-        val lastModifiedXml = "<D:getlastmodified>${sdf.format(lastModifiedDate)}</D:getlastmodified>"
+        val lastModifiedXml =
+            "<D:getlastmodified>${sdf.format(lastModifiedDate)}</D:getlastmodified>"
 
         val creationDate = saved["Z:Win32CreationTime"]
             ?.substringAfter(">")?.substringBefore("<")
-            ?.let { raw -> try { sdf.parse(raw) } catch (_: Exception) { null } }
+            ?.let { raw ->
+                try {
+                    sdf.parse(raw)
+                } catch (_: Exception) {
+                    null
+                }
+            }
 
         val creationDateXml: String? = creationDate?.let {
             "<D:creationdate>${isoSdf.format(it)}</D:creationdate>"
