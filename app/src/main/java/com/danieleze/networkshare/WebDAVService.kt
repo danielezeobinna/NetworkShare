@@ -18,6 +18,7 @@ import android.os.Build
 import android.app.NotificationChannel
 import android.app.PendingIntent
 import com.danieleze.networkshare.NetworkManager.CHANNEL_ID
+import fi.iki.elonen.NanoHTTPD
 
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -61,7 +62,9 @@ class WebDAVService : Service(), TransferListener,
     override fun showSafetyAlert(fileName: String) = postSafetyAlert(fileName)
 
     override fun getObjects(uri: String): Any? {
-        if (!isNetworkTrusted.value) return 403
+        if (!isNetworkTrusted.value) {
+            return DavError(NanoHTTPD.Response.Status.FORBIDDEN, "Network not trusted")
+        }
         return FileManager.getObjects(uri)
     }
 

@@ -63,6 +63,10 @@ private object WebDAVStatus {
         override fun getRequestStatus(): Int = 423
         override fun getDescription(): String = "423 Locked"
     }
+    val MULTI_STATUS: NanoHTTPD.Response.IStatus = object : NanoHTTPD.Response.IStatus {
+        override fun getRequestStatus(): Int = 207
+        override fun getDescription(): String = "207 Multi-Status"
+    }
 }
 
 private object PropertyStore {
@@ -386,6 +390,8 @@ abstract class FastHTTPD(
     }
 }
 
+data class DavError(val status: NanoHTTPD.Response.IStatus, val message: String)
+
 interface WebDAVServerConfig {
     fun getAuthInfo(key: String): Any?
     fun cancelTransfer(fileName: String): Boolean
@@ -425,6 +431,8 @@ class WebDAVServer private constructor(
         private const val SERVER_NAME = "WebDAN"
         private const val SERVER_VERSION = "0.9.0"
         const val SERVER_HEADER_VALUE = "$SERVER_NAME/$SERVER_VERSION"
+
+        // ── Lifecycle ────────────────────────────────────────────
         fun startServer(
             context: Context,
             listener: TransferListener,
@@ -450,6 +458,11 @@ class WebDAVServer private constructor(
             return null
         }
     }
+    fun stopServer() {
+        isShuttingDown = true
+        Thread.sleep(500)
+        stop()
+    }
 
     // ── Entry point ──────────────────────────────────────────
 
@@ -461,9 +474,9 @@ class WebDAVServer private constructor(
         } catch (e: Exception) {
             Log.e(tag, "Unhandled error in serve(): ${e.message}", e)
             newFixedLengthResponse(
-                Response.Status.FORBIDDEN,
+                Response.Status.INTERNAL_ERROR,
                 MIME_PLAINTEXT,
-                "Server busy, please retry."
+                "Internal error: ${e::class.simpleName}: ${e.message}"
             ).apply {
                 addHeader("Server", SERVER_HEADER_VALUE)
             }
@@ -474,7 +487,7 @@ class WebDAVServer private constructor(
 
         if (isShuttingDown) {
             return newFixedLengthResponse(
-                Response.Status.NOT_FOUND,
+                Response.Status.SERVICE_UNAVAILABLE,
                 MIME_PLAINTEXT,
                 "Server is shutting down."
             )
@@ -525,14 +538,15 @@ class WebDAVServer private constructor(
 
         val result = config.getObjects(uri)
 
-        if (result is Int) {
-            return newFixedLengthResponse(
-                Response.Status.lookup(result), MIME_PLAINTEXT, "Error $result"
-            )
+        if (result is Response.IStatus) {
+            return newFixedLengthResponse(result, MIME_PLAINTEXT, result.description)
+        }
+        if (result is DavError) {
+            return newFixedLengthResponse(result.status, MIME_PLAINTEXT, result.message)
         }
         if (result == null) {
             return newFixedLengthResponse(
-                Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not Found"
+                Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Object Not Found"
             )
         }
 
@@ -754,7 +768,7 @@ class WebDAVServer private constructor(
             </D:multistatus>""".trimIndent()
 
         return newFixedLengthResponse(
-            Response.Status.lookup(207),
+            WebDAVStatus.MULTI_STATUS,
             "application/xml; charset=utf-8",
             xml
         )
@@ -768,13 +782,10 @@ class WebDAVServer private constructor(
 
             val destFile: File = when (val result = config.getObjects(decodedPath)) {
                 is File -> result
-                is Int -> return newFixedLengthResponse(
-                    Response.Status.lookup(result), MIME_PLAINTEXT, "Error $result"
+                is Response.IStatus -> return newFixedLengthResponse(
+                    result, MIME_PLAINTEXT, result.description
                 )
-
-                else -> return newFixedLengthResponse(
-                    Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not Found"
-                )
+                else -> return serveNotFound()
             }
 
             destFile.parentFile?.mkdirs()
@@ -800,12 +811,9 @@ class WebDAVServer private constructor(
 
             val destFile: File = when (val result = config.getObjects(decodedPath)) {
                 is File -> result
-                is Int -> return newFixedLengthResponse(
-                    Response.Status.lookup(result),
-                    MIME_PLAINTEXT,
-                    "Error $result"
+                is Response.IStatus -> return newFixedLengthResponse(
+                    result, MIME_PLAINTEXT, result.description
                 )
-
                 else -> {
                     File(target.parent, decodedPath.substringAfterLast("/"))
                 }
@@ -832,9 +840,8 @@ class WebDAVServer private constructor(
                 val res = newFixedLengthResponse(
                     WebDAVStatus.LOCKED,
                     MIME_PLAINTEXT,
-                    "Locked"
+                    "Object Locked"
                 )
-                res.addHeader("Retry-After", "3")
                 return res
             }
         }
@@ -1049,7 +1056,7 @@ class WebDAVServer private constructor(
 
         xml.append("</D:multistatus>")
         return newFixedLengthResponse(
-            Response.Status.lookup(207),
+            WebDAVStatus.MULTI_STATUS,
             "application/xml; charset=utf-8",
             xml.toString()
         )
@@ -1202,13 +1209,6 @@ class WebDAVServer private constructor(
             Log.w(tag, "Copy fallback failed moving temp file to ${target.name}: ${e.message}")
             false
         }
-    }
-    // ── Lifecycle ────────────────────────────────────────────
-
-    fun stopServer() {
-        isShuttingDown = true
-        Thread.sleep(500)
-        stop()
     }
 }
 

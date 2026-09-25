@@ -7,6 +7,7 @@ import android.os.Environment
 import android.os.storage.StorageManager
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import fi.iki.elonen.NanoHTTPD
 import java.io.File
 
 data class FolderItem(
@@ -246,15 +247,15 @@ object FileManager {
         }
 
         if (clean.equals("desktop.ini", ignoreCase = true)) {
-            return desktopIniFile("server_root", serverIniContent) ?: 404
+            return desktopIniFile("server_root", serverIniContent)
         }
 
         if (clean.equals("ic_ns.png", ignoreCase = true)) {
-            return appIconFile() ?: 404
+            return appIconFile()
         }
 
         if (clean.equals("browser_instructions.html", ignoreCase = true)) {
-            return browserInstructionsFile() ?: 404
+            return browserInstructionsFile()
         }
 
         val slashIndex = clean.indexOf('/')
@@ -266,20 +267,19 @@ object FileManager {
         val absPath = file.absolutePath
 
         if (file.name.equals("ic_ns.png", ignoreCase = true) && !file.exists()) {
-            return appIconFile() ?: 404
+            return appIconFile()
         }
 
         if (file.name.equals("desktop.ini", ignoreCase = true) && !file.exists()) {
             if (rest == "desktop.ini") {
-                // This is the storage label's own desktop.ini (e.g. "/Internal Storage/desktop.ini")
-                return desktopIniFile("label_$label", storageLabelIniContent) ?: 404
+                return desktopIniFile("label_$label", storageLabelIniContent)
             }
             val folderName = file.parentFile?.name
             val isStorageRoot =
                 folderName != null && rootPath == file.parentFile?.parentFile?.absolutePath
             if (isStorageRoot) {
                 val content = desktopIniContent[folderName] ?: return null
-                return desktopIniFile("${label}_$folderName", content) ?: 404
+                return desktopIniFile("${label}_$folderName", content)
             }
         }
 
@@ -287,7 +287,7 @@ object FileManager {
             absPath == allowed || absPath.startsWith("$allowed/") || allowed.startsWith("$absPath/")
         }
 
-        if (!isAllowed) return 403
+        if (!isAllowed) return DavError(NanoHTTPD.Response.Status.FORBIDDEN, "Access denied")
 
         if (!file.exists()) {
             return file
