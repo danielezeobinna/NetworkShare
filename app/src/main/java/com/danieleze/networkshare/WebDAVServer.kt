@@ -58,17 +58,6 @@ private object PersistenceGuard {
     }
 }
 
-private object WebDAVStatus {
-    val LOCKED: NanoHTTPD.Response.IStatus = object : NanoHTTPD.Response.IStatus {
-        override fun getRequestStatus(): Int = 423
-        override fun getDescription(): String = "423 Locked"
-    }
-    val MULTI_STATUS: NanoHTTPD.Response.IStatus = object : NanoHTTPD.Response.IStatus {
-        override fun getRequestStatus(): Int = 207
-        override fun getDescription(): String = "207 Multi-Status"
-    }
-}
-
 private object PropertyStore {
     private const val PREFS_NAME = "webdav_properties_prefs"
 
@@ -116,13 +105,21 @@ private object PropertyStore {
     }
 }
 
+data class DavResponse(
+    val requestStatus: Int,
+    val description: String,
+    val mimeType: String,
+    val txt: String
+)
+
 // ─────────────────────────────────────────────────────────────
 //  Digest Auth Manager (embedded)
 // ─────────────────────────────────────────────────────────────
+@Suppress("SpellCheckingInspection")
 private object DigestAuthManager {
-    private const val REALM = "NetworkShare"
-    private const val NONCE_VALIDITY_MS = 1_800_000L
-    private const val SESSION_IDLE_MS = 600_000L
+    private const val REALM = "WebDAN"
+    private const val NONCE_VALIDITY_MS = 300_000L
+    private const val SESSION_IDLE_MS = 10_000L
 
     // nonce -> creation timestamp
     private val validNonces = ConcurrentHashMap<String, Long>()
@@ -278,10 +275,11 @@ private object DigestAuthManager {
     }
 }
 
+@Suppress("SpellCheckingInspection")
 abstract class FastHTTPD(
-    boundIp: String,
+    ip: String,
     port: Int
-) : NanoHTTPD(boundIp, port) {
+) : NanoHTTPD(ip, port) {
 
     companion object {
         /**
@@ -390,36 +388,36 @@ abstract class FastHTTPD(
     }
 }
 
-data class DavError(val status: NanoHTTPD.Response.IStatus, val message: String)
-
-interface WebDAVServerConfig {
+interface WebDANConfig {
     fun getAuthInfo(key: String): Any?
     fun cancelTransfer(fileName: String): Boolean
     fun showSafetyAlert(fileName: String)
     fun getObjects(uri: String): Any?
     fun getIpAddress(): String?
     fun getPort(): Int? = null
+    fun directoryGETResponse(uncPath: String): DavResponse? = null
 }
 
 // ─────────────────────────────────────────────────────────────
 //  WebDAV Server
 // ─────────────────────────────────────────────────────────────
-class WebDAVServer private constructor(
+@Suppress("SpellCheckingInspection")
+class WebDAN private constructor(
     val port: Int,
     private val context: Context,
     private val listener: TransferListener,
-    private val config: WebDAVServerConfig,
-    val boundIp: String = config.getIpAddress() ?: "0.0.0.0"
-) : FastHTTPD(boundIp, port) {
+    private val config: WebDANConfig,
+    val ip: String = config.getIpAddress() ?: "0.0.0.0"
+) : FastHTTPD(ip, port) {
 
     var scheme: String = "http"
         private set
 
     val serverAddress: String
-        get() = "$scheme://$boundIp:$port"
+        get() = "$scheme://$ip:$port"
 
     private var isShuttingDown = false
-    private val tag = "WebDAVServer:$port"
+    private val tag = "WebDAN:$port"
 
     init {
         val user = config.getAuthInfo("username") as? String ?: ""
@@ -436,15 +434,15 @@ class WebDAVServer private constructor(
         fun startServer(
             context: Context,
             listener: TransferListener,
-            config: WebDAVServerConfig,
+            config: WebDANConfig,
             secure: Boolean = false,
             onStarted: ((String) -> Unit)? = null
-        ): WebDAVServer? {
+        ): WebDAN? {
             PropertyStore.cleanupStaleEntries(context)
 
             var candidatePort = config.getPort() ?: 8080
             repeat(50) {
-                val server = WebDAVServer(candidatePort, context, listener, config)
+                val server = WebDAN(candidatePort, context, listener, config)
                 try {
                     server.start(SOCKET_READ_TIMEOUT, false)
                     Log.d(server.tag, "Server started on port $candidatePort")
@@ -458,6 +456,7 @@ class WebDAVServer private constructor(
             return null
         }
     }
+
     fun stopServer() {
         isShuttingDown = true
         Thread.sleep(500)
@@ -538,11 +537,12 @@ class WebDAVServer private constructor(
 
         val result = config.getObjects(uri)
 
-        if (result is Response.IStatus) {
-            return newFixedLengthResponse(result, MIME_PLAINTEXT, result.description)
-        }
-        if (result is DavError) {
-            return newFixedLengthResponse(result.status, MIME_PLAINTEXT, result.message)
+        if (result is DavResponse) {
+            return newFixedLengthResponse(
+                mapStatus(result.requestStatus, result.description),
+                result.mimeType,
+                result.txt
+            )
         }
         if (result == null) {
             return newFixedLengthResponse(
@@ -768,7 +768,7 @@ class WebDAVServer private constructor(
             </D:multistatus>""".trimIndent()
 
         return newFixedLengthResponse(
-            WebDAVStatus.MULTI_STATUS,
+            Response.Status.MULTI_STATUS,
             "application/xml; charset=utf-8",
             xml
         )
@@ -782,9 +782,10 @@ class WebDAVServer private constructor(
 
             val destFile: File = when (val result = config.getObjects(decodedPath)) {
                 is File -> result
-                is Response.IStatus -> return newFixedLengthResponse(
-                    result, MIME_PLAINTEXT, result.description
+                is DavResponse -> return newFixedLengthResponse(
+                    mapStatus(result.requestStatus, result.description), result.mimeType, result.txt
                 )
+
                 else -> return serveNotFound()
             }
 
@@ -811,9 +812,10 @@ class WebDAVServer private constructor(
 
             val destFile: File = when (val result = config.getObjects(decodedPath)) {
                 is File -> result
-                is Response.IStatus -> return newFixedLengthResponse(
-                    result, MIME_PLAINTEXT, result.description
+                is DavResponse -> return newFixedLengthResponse(
+                    mapStatus(result.requestStatus, result.description), result.mimeType, result.txt
                 )
+
                 else -> {
                     File(target.parent, decodedPath.substringAfterLast("/"))
                 }
@@ -838,8 +840,11 @@ class WebDAVServer private constructor(
                 config.showSafetyAlert(target.name)
                 Log.w(tag, "Safety Lock Active: Blocking DELETE for ${target.name}")
                 val res = newFixedLengthResponse(
-                    WebDAVStatus.LOCKED,
-                    MIME_PLAINTEXT,
+                    mapStatus(
+                        423,
+                        "Locked"
+                    ),
+                    "text/plain; charset=utf-8",
                     "Object Locked"
                 )
                 return res
@@ -855,6 +860,11 @@ class WebDAVServer private constructor(
     }
 
     // ── Utility responses ────────────────────────────────────
+    private fun mapStatus(requestStatus: Int, description: String): Response.IStatus =
+        object : Response.IStatus {
+            override fun getRequestStatus() = requestStatus
+            override fun getDescription() = description
+        }
 
     private fun serveNotFound() =
         newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not Found")
@@ -894,13 +904,17 @@ class WebDAVServer private constructor(
     // ── File serving ─────────────────────────────────────────
 
     private fun serveFile(target: File, session: IHTTPSession): Response {
+        if (!target.exists()) {
+            return serveNotFound()
+        }
+
         val fileLength = target.length()
         val rangeHeader = session.headers["range"]
         val sessionKey = "${session.remoteIpAddress}|${session.headers["user-agent"]}"
 
         return try {
             if (target.isDirectory) {
-                val host = session.headers["host"] ?: "$boundIp:$port"
+                val host = session.headers["host"] ?: "$ip:$port"
                 val parts = host.split(":")
                 val ip = parts[0]
                 val portStr = if (parts.size > 1) parts[1] else "80"
@@ -910,20 +924,25 @@ class WebDAVServer private constructor(
                 else uriPath.replace('/', '\\')
                 val uncFull = "$uncBase$uncSubPath"
 
-                val templateFile = config.getObjects("browser_instructions.html") as? File
-                val customHtml = templateFile?.takeIf { it.exists() }?.readText()
-                    ?.replace("{{UNC_PATH}}", uncFull)
-                return if (customHtml != null) {
-                    newFixedLengthResponse(
-                        Response.Status.FORBIDDEN, "text/html; charset=utf-8", customHtml
-                    )
-                } else {
-                    newFixedLengthResponse(
-                        Response.Status.FORBIDDEN, "text/plain; charset=utf-8",
-                        "This is a WebDAV server. It cannot be opened in a browser.\n\n" +
-                                "To access it, use a WebDAV client and connect to:\n$uncFull"
+                val response = config.directoryGETResponse(uncFull)
+                if (response != null) {
+                    return newFixedLengthResponse(
+                        mapStatus(response.requestStatus, response.description),
+                        response.mimeType,
+                        response.txt
                     )
                 }
+
+                // App hasn't implemented a directory view — library's own baseline fallback
+                return newFixedLengthResponse(
+                    Response.Status.NOT_IMPLEMENTED, "text/plain; charset=utf-8",
+                    "This WebDAV server does not support directly browsing folders using GET requests.\n\n" +
+                            "If you're seeing this page in a web browser, a WebDAV client (such as Windows Explorer) may have redirected you here instead of opening the folder normally.\n\n" +
+                            "Try one of the following:\n" +
+                            "- If you're using Windows Explorer, connect using this network path instead:\n  $uncFull\n" +
+                            "- If you're using another WebDAV client, make sure it supports standard WebDAV folder browsing.\n" +
+                            "- If the problem persists, try a different WebDAV client."
+                )
             }
 
             var startOffset = 0L
@@ -1056,7 +1075,7 @@ class WebDAVServer private constructor(
 
         xml.append("</D:multistatus>")
         return newFixedLengthResponse(
-            WebDAVStatus.MULTI_STATUS,
+            Response.Status.MULTI_STATUS,
             "application/xml; charset=utf-8",
             xml.toString()
         )

@@ -7,7 +7,6 @@ import android.os.Environment
 import android.os.storage.StorageManager
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
-import fi.iki.elonen.NanoHTTPD
 import java.io.File
 
 data class FolderItem(
@@ -180,7 +179,7 @@ object FileManager {
         return iconFile
     }
 
-    private fun browserInstructionsFile(): File? {
+    fun browserInstructionsFile(): File? {
         val context = appContext ?: return null
         val cacheDir = File(System.getProperty("java.io.tmpdir"), "virtual_assets")
         if (!cacheDir.exists()) cacheDir.mkdirs()
@@ -287,7 +286,12 @@ object FileManager {
             absPath == allowed || absPath.startsWith("$allowed/") || allowed.startsWith("$absPath/")
         }
 
-        if (!isAllowed) return DavError(NanoHTTPD.Response.Status.FORBIDDEN, "Access denied")
+        if (!isAllowed) return DavResponse(
+            403,
+            "Forbidden",
+            "text/plain; charset=utf-8",
+            "Access denied"
+        )
 
         if (!file.exists()) {
             return file
@@ -364,6 +368,7 @@ object FileManager {
             }
 
             // Samsung My Files FileProvider — path is embedded directly in the URI segments
+            @Suppress("SpellCheckingInspection")
             if (uri.authority == "com.sec.android.app.myfiles.FileProvider") {
                 val segments = uri.pathSegments
                 val storageIndex = segments.indexOf("device_storage")
@@ -393,7 +398,12 @@ object FileManager {
         android.util.Log.d(
             "FileManager",
             "resolveRealPath failed. scheme=${uri.scheme}, authority=${uri.authority}, " +
-                    "uri=$uri, isDocumentUri=${android.provider.DocumentsContract.isDocumentUri(context, uri)}, " +
+                    "uri=$uri, isDocumentUri=${
+                        android.provider.DocumentsContract.isDocumentUri(
+                            context,
+                            uri
+                        )
+                    }, " +
                     "pathSegments=${uri.pathSegments}"
         )
         if (uri.scheme == "file") return uri.path

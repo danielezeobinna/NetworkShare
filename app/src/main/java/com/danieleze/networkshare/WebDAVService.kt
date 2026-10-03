@@ -18,12 +18,12 @@ import android.os.Build
 import android.app.NotificationChannel
 import android.app.PendingIntent
 import com.danieleze.networkshare.NetworkManager.CHANNEL_ID
-import fi.iki.elonen.NanoHTTPD
 
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED ||
-            intent.action == "android.intent.action.QUICKBOOT_POWERON") {
+            intent.action == "android.intent.action.QUICKBOOT_POWERON"
+        ) {
 
             WebDAVService.loadPaths(context)
 
@@ -34,7 +34,7 @@ class BootReceiver : BroadcastReceiver() {
 }
 
 class WebDAVService : Service(), TransferListener,
-    NetworkManager.NetworkEventListener, WebDAVServerConfig {
+    NetworkManager.NetworkEventListener, WebDANConfig {
 
     private var currentSsid: String = ""
     private var wakeLock: android.os.PowerManager.WakeLock? = null
@@ -57,15 +57,23 @@ class WebDAVService : Service(), TransferListener,
         "token" -> generateToken()
         else -> null
     }
+
     override fun getIpAddress(): String? = NetworkManager.getLocalIpAddress()
     override fun cancelTransfer(fileName: String) = WebDAVService.cancelTransfer(fileName)
     override fun showSafetyAlert(fileName: String) = postSafetyAlert(fileName)
 
     override fun getObjects(uri: String): Any? {
         if (!isNetworkTrusted.value) {
-            return DavError(NanoHTTPD.Response.Status.FORBIDDEN, "Network not trusted")
+            return DavResponse(403, "Forbidden", "text/plain; charset=utf-8", "Network not trusted")
         }
         return FileManager.getObjects(uri)
+    }
+
+    override fun directoryGETResponse(uncPath: String): DavResponse? {
+        val templateFile = FileManager.browserInstructionsFile() ?: return null
+        if (!templateFile.exists()) return null
+        val customHtml = templateFile.readText().replace("{{UNC_PATH}}", uncPath)
+        return DavResponse(200, "OK", "text/html; charset=utf-8", customHtml)
     }
 
     override fun onNetworkTrustChanged(state: NetworkState, ssid: String) {
@@ -79,7 +87,10 @@ class WebDAVService : Service(), TransferListener,
             }
 
             NetworkState.NO_NETWORK -> {
-                if (isRunning) getSystemService(NotificationManager::class.java)?.notify(1, defaultNotification(continuing = wasTrusted))
+                if (isRunning) getSystemService(NotificationManager::class.java)?.notify(
+                    1,
+                    defaultNotification(continuing = wasTrusted)
+                )
                 wsDiscoveryService.stop()
                 broadcastCurrentAddresses()
             }
@@ -88,7 +99,10 @@ class WebDAVService : Service(), TransferListener,
                 wsDiscoveryService.stop()
                 when (NetworkManager.getTrust(ssid)) {
                     NetworkManager.Trust.BLOCKED -> showBlockedNetworkNotification(this)
-                    else -> if (isRunning) getSystemService(NotificationManager::class.java)?.notify(1, defaultNotification(continuing = wasTrusted))
+                    else -> if (isRunning) getSystemService(NotificationManager::class.java)?.notify(
+                        1,
+                        defaultNotification(continuing = wasTrusted)
+                    )
                 }
             }
         }
@@ -96,9 +110,9 @@ class WebDAVService : Service(), TransferListener,
 
     override fun onRefreshServersIfNeeded() {
         val newIp = NetworkManager.getLocalIpAddress()
-        val currentIp = activeServers.firstOrNull()?.boundIp
+        val currentIp = activeServers.firstOrNull()?.ip
         if (newIp != null && newIp != currentIp) {
-            startWebDAVServers()
+            startWebDAVServer()
         }
     }
 
@@ -109,7 +123,7 @@ class WebDAVService : Service(), TransferListener,
 
     override fun onHotspotEnabled() {
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            startWebDAVServers()
+            startWebDAVServer()
         }, 1500)
         if (isWaitingForHotspot) {
             isWaitingForHotspot = false
@@ -122,7 +136,7 @@ class WebDAVService : Service(), TransferListener,
     override fun onWifiEnabled() {
         wifiJustEnabled = true
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            startWebDAVServers()
+            startWebDAVServer()
         }, 1500)
     }
 
@@ -137,7 +151,7 @@ class WebDAVService : Service(), TransferListener,
 
         if (intent?.action == "REFRESH_INFO") {
             if (activeServers.isEmpty() && FileManager.selectedPaths.isNotEmpty()) {
-                startWebDAVServers()
+                startWebDAVServer()
             }
             broadcastCurrentAddresses()
             return START_STICKY
@@ -151,7 +165,7 @@ class WebDAVService : Service(), TransferListener,
 
         if (intent?.action == "RESTART_SERVERS") {
             isStartingServers = false
-            startWebDAVServers()
+            startWebDAVServer()
             return START_STICKY
         }
 
@@ -194,7 +208,7 @@ class WebDAVService : Service(), TransferListener,
 
         NetworkManager.setEventListener(this)
 
-        startWebDAVServers()
+        startWebDAVServer()
 
         NetworkManager.registerNetworkCallback(
             context = this,
@@ -248,7 +262,7 @@ class WebDAVService : Service(), TransferListener,
 
     private var isStartingServers = false
 
-    private fun startWebDAVServers() {
+    private fun startWebDAVServer() {
         if (isStartingServers) return
         isStartingServers = true
         stopActiveServers()
@@ -271,11 +285,11 @@ class WebDAVService : Service(), TransferListener,
             return
         }
 
-        val server = WebDAVServer.startServer(this, this, this)
+        val server = WebDAN.startServer(this, this, this)
         if (server != null) {
             activeServers.add(server)
             wsDiscoveryService.webdavAddress = friendlyServerAddress
-            Log.d(tag, "Unified server started on port ${server.port}")
+            Log.d(tag, "Server started on port ${server.port}")
         } else {
             Log.e(tag, "Failed to start server after multiple attempts")
         }
@@ -293,7 +307,7 @@ class WebDAVService : Service(), TransferListener,
 
     private fun broadcastCurrentAddresses() {
         val server = activeServers.firstOrNull()
-        val isValidNetwork = (server?.boundIp ?: "0.0.0.0") != "0.0.0.0"
+        val isValidNetwork = (server?.ip ?: "0.0.0.0") != "0.0.0.0"
         val friendlyBase = friendlyServerAddress
         val ipBase = server?.serverAddress ?: "http://0.0.0.0:8080"
 
@@ -357,15 +371,16 @@ class WebDAVService : Service(), TransferListener,
 
     // ── Notifications ─────────────────────────────────────────
 
-    private fun defaultNotification(continuing: Boolean = false): Notification = buildServiceNotification(
-        title = "Network sharing is off",
-        text = if (continuing)
-            "No network available. Connect or create a network to continue sharing."
-        else
-            "No network available. Connect or create a network to start sharing.",
-        silent = true,
-        trusted = false
-    )
+    private fun defaultNotification(continuing: Boolean = false): Notification =
+        buildServiceNotification(
+            title = "Network sharing is off",
+            text = if (continuing)
+                "No network available. Connect or create a network to continue sharing."
+            else
+                "No network available. Connect or create a network to start sharing.",
+            silent = true,
+            trusted = false
+        )
 
     private fun buildServiceNotification(
         title: String,
@@ -402,32 +417,38 @@ class WebDAVService : Service(), TransferListener,
 
     fun showTrustNotification(context: Context, ssid: String, silent: Boolean = false) {
         val manager = context.getSystemService(NotificationManager::class.java)
-        manager?.notify(1, buildServiceNotification(
-            title = "Network sharing is off",
-            text = "\"$ssid\" is unknown. Open the app to decide whether to allow it.",
-            silent = silent,
-            trusted = false
-        ))
+        manager?.notify(
+            1, buildServiceNotification(
+                title = "Network sharing is off",
+                text = "\"$ssid\" is unknown. Open the app to decide whether to allow it.",
+                silent = silent,
+                trusted = false
+            )
+        )
     }
 
     fun showBlockedNetworkNotification(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java)
-        manager?.notify(1, buildServiceNotification(
-            title = "Network sharing is off",
-            text = "This network is blocked. Open the app to manage trusted networks.",
-            silent = true,
-            trusted = false
-        ))
+        manager?.notify(
+            1, buildServiceNotification(
+                title = "Network sharing is off",
+                text = "This network is blocked. Open the app to manage trusted networks.",
+                silent = true,
+                trusted = false
+            )
+        )
     }
 
     fun restoreSharingNotification(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java)
-        manager?.notify(1, buildServiceNotification(
-            title = "Network sharing is on",
-            text = "Your phone can be accessed by other devices on this network",
-            silent = true,
-            trusted = true
-        ))
+        manager?.notify(
+            1, buildServiceNotification(
+                title = "Network sharing is on",
+                text = "Your phone can be accessed by other devices on this network",
+                silent = true,
+                trusted = true
+            )
+        )
     }
 
     fun ensureChannel(manager: NotificationManager?) {
@@ -572,7 +593,7 @@ class WebDAVService : Service(), TransferListener,
         var username = mutableStateOf(sanitizeHostnameSegment(Build.MODEL))
         var password = mutableStateOf("pass")
         var useFallbackAddress = mutableStateOf(false)
-        val activeServers = mutableListOf<WebDAVServer>()
+        val activeServers = mutableListOf<WebDAN>()
 
         private fun sanitizeHostnameSegment(raw: String): String {
             return raw
@@ -590,10 +611,11 @@ class WebDAVService : Service(), TransferListener,
             }
 
         fun baseAddressForPort(port: Int): String {
-            val server = activeServers.firstOrNull { it.port == port } ?: activeServers.firstOrNull()
+            val server =
+                activeServers.firstOrNull { it.port == port } ?: activeServers.firstOrNull()
             val scheme = server?.scheme ?: "http"
             return if (useFallbackAddress.value) {
-                "$scheme://${server?.boundIp ?: "0.0.0.0"}:$port"
+                "$scheme://${server?.ip ?: "0.0.0.0"}:$port"
             } else {
                 friendlyServerAddress
             }
@@ -630,7 +652,8 @@ class WebDAVService : Service(), TransferListener,
         fun loadPaths(context: Context) {
             val prefs = context.getSharedPreferences("network_share_prefs", MODE_PRIVATE)
             isAuthEnabled.value = prefs.getBoolean("auth_enabled", true)
-            username.value = sanitizeHostnameSegment(prefs.getString("username", Build.MODEL) ?: Build.MODEL)
+            username.value =
+                sanitizeHostnameSegment(prefs.getString("username", Build.MODEL) ?: Build.MODEL)
             password.value = prefs.getString("password", "pass") ?: "pass"
             useFallbackAddress.value = prefs.getBoolean("use_fallback_address", false)
             val saved = prefs.getStringSet("shared_paths", null)
