@@ -112,6 +112,14 @@ data class DavResponse(
     val txt: String
 )
 
+enum class CancelState {
+    /** Server is asking: should this transfer stop? Return true to cancel. */
+    CHECK,
+
+    /** Server is telling: the transfer has stopped. Return value is ignored. */
+    CANCELLED
+}
+
 // ─────────────────────────────────────────────────────────────
 //  Digest Auth Manager (embedded)
 // ─────────────────────────────────────────────────────────────
@@ -389,13 +397,32 @@ abstract class FastHTTPD(
 }
 
 interface WebDANConfig {
-    fun getAuthInfo(key: String): Any?
-    fun cancelTransfer(fileName: String): Boolean
-    fun showSafetyAlert(fileName: String)
+
+    // ── Authentication ───────────────────────────────────────
+    fun authSwitch(): Boolean
+    fun authUsername(): String
+    fun authPassword(): String
+    fun authToken(): String
+
+    // ── Server ───────────────────────────────────────────────
     fun getObjects(uri: String): Any?
     fun getIpAddress(): String?
     fun getPort(): Int? = null
-    fun directoryGETResponse(uncPath: String): DavResponse? = null
+    fun getDirectoryGETResponse(uncPath: String): DavResponse? = null
+
+    // ── Transfer ─────────────────────────────────────────────
+    fun onTransferProgress(
+        fileName: String,
+        currentBytes: Long,
+        totalBytes: Long,
+        isReceiving: Boolean
+    ) {
+    }
+
+    fun onTransferComplete(fileName: String) {}
+    fun onTransferCancel(fileName: String, state: CancelState): Boolean = false
+    fun onTransferError(fileName: String, message: String) {}
+    fun onTransferBlocked(fileName: String) {}
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -405,7 +432,6 @@ interface WebDANConfig {
 class WebDAN private constructor(
     val port: Int,
     private val context: Context,
-    private val listener: TransferListener,
     private val config: WebDANConfig,
     val ip: String = config.getIpAddress() ?: "0.0.0.0"
 ) : FastHTTPD(ip, port) {
@@ -420,9 +446,7 @@ class WebDAN private constructor(
     private val tag = "WebDAN:$port"
 
     init {
-        val user = config.getAuthInfo("username") as? String ?: ""
-        val pass = config.getAuthInfo("password") as? String ?: ""
-        DigestAuthManager.setCredentials(user, pass)
+        DigestAuthManager.setCredentials(config.authUsername(), config.authPassword())
     }
 
     companion object {
@@ -433,7 +457,6 @@ class WebDAN private constructor(
         // ── Lifecycle ────────────────────────────────────────────
         fun startServer(
             context: Context,
-            listener: TransferListener,
             config: WebDANConfig,
             secure: Boolean = false,
             onStarted: ((String) -> Unit)? = null
@@ -442,7 +465,7 @@ class WebDAN private constructor(
 
             var candidatePort = config.getPort() ?: 8080
             repeat(50) {
-                val server = WebDAN(candidatePort, context, listener, config)
+                val server = WebDAN(candidatePort, context, config)
                 try {
                     server.start(SOCKET_READ_TIMEOUT, false)
                     Log.d(server.tag, "Server started on port $candidatePort")
@@ -494,15 +517,14 @@ class WebDAN private constructor(
 
         // OPTIONS must always pass unauthenticated – Windows probes this first
         // before it even has credentials to send.
-        val authEnabled = config.getAuthInfo("enabled") as? Boolean ?: false
-        if (session.method != Method.OPTIONS && authEnabled) {
+        if (session.method != Method.OPTIONS && config.authSwitch()) {
             val sessionKey = "${session.remoteIpAddress}|${session.headers["user-agent"]}"
             val authHeader = session.headers["authorization"] ?: ""
 
             // Token bypass — read-only operations only (streaming/download via URL)
             val tokenParam = session.parameters["token"]?.firstOrNull()
             val isValidToken = !tokenParam.isNullOrBlank() &&
-                    tokenParam == config.getAuthInfo("token") as? String
+                    tokenParam == config.authToken()
             val isReadOnly = session.method == Method.GET ||
                     session.method == Method.HEAD
 
@@ -650,14 +672,17 @@ class WebDAN private constructor(
                 var lastUpdateTime = 0L
 
                 while (totalRead < contentLength) {
-                    if (config.cancelTransfer(target.name)) {
+                    if (config.onTransferCancel(target.name, CancelState.CHECK)) {
                         tempFile.delete()
+                        config.onTransferCancel(target.name, CancelState.CANCELLED)
                         // Lock stays active — original file is protected.
-                        return newFixedLengthResponse(
+                        val res = newFixedLengthResponse(
                             Response.Status.FORBIDDEN,
                             MIME_PLAINTEXT,
                             "Transfer cancelled by user."
                         )
+                        res.closeConnection(true)
+                        return res
                     }
 
                     val read = inputStream.read(buffer)
@@ -667,7 +692,7 @@ class WebDAN private constructor(
 
                     val currentTime = System.currentTimeMillis()
                     if (currentTime - lastUpdateTime >= 500) {
-                        listener.onTransferProgress(target.name, totalRead, contentLength, true)
+                        config.onTransferProgress(target.name, totalRead, contentLength, true)
                         lastUpdateTime = currentTime
                     }
                 }
@@ -677,6 +702,7 @@ class WebDAN private constructor(
                 if (target.exists()) target.delete()
                 if (moveTempToTarget(tempFile, target)) {
                     if (isReplace) PersistenceGuard.clear(context, target.absolutePath)
+                    config.onTransferComplete(target.name)
                     newFixedLengthResponse(Response.Status.CREATED, MIME_PLAINTEXT, "")
                 } else {
                     tempFile.delete()
@@ -688,7 +714,7 @@ class WebDAN private constructor(
                 }
             } else {
                 tempFile.delete()
-                // Incomplete upload — lock stays on the original if it's a replace.
+                config.onTransferError(target.name, "Transfer incomplete")
                 newFixedLengthResponse(
                     Response.Status.INTERNAL_ERROR,
                     MIME_PLAINTEXT,
@@ -697,6 +723,8 @@ class WebDAN private constructor(
             }
 
         } catch (e: Exception) {
+            Log.e(tag, "PUT failed for ${target.name}", e)
+            config.onTransferError(target.name, e.message ?: "Upload failed")
             if (tempFile.exists()) tempFile.delete()
             if (target.exists() && target.length() == 0L) {
                 PersistenceGuard.forceRelease(context, target.absolutePath)
@@ -705,7 +733,6 @@ class WebDAN private constructor(
             newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, e.message)
         } finally {
             DigestAuthManager.resumeTimer(sessionKey)
-            listener.onTransferComplete(target.name)
         }
     }
 
@@ -837,7 +864,7 @@ class WebDAN private constructor(
         val path = target.absolutePath
         if (target.isFile) {
             if (!PersistenceGuard.isSafeToDelete(context, path)) {
-                config.showSafetyAlert(target.name)
+                config.onTransferBlocked(target.name)
                 Log.w(tag, "Safety Lock Active: Blocking DELETE for ${target.name}")
                 val res = newFixedLengthResponse(
                     mapStatus(
@@ -855,6 +882,7 @@ class WebDAN private constructor(
             PersistenceGuard.clear(context, path)
             newFixedLengthResponse(Response.Status.NO_CONTENT, MIME_PLAINTEXT, "")
         } else {
+            config.onTransferError(target.name, "Delete failed")
             newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Delete failed")
         }
     }
@@ -863,7 +891,7 @@ class WebDAN private constructor(
     private fun mapStatus(requestStatus: Int, description: String): Response.IStatus =
         object : Response.IStatus {
             override fun getRequestStatus() = requestStatus
-            override fun getDescription() = description
+            override fun getDescription() = "$requestStatus $description"
         }
 
     private fun serveNotFound() =
@@ -924,7 +952,7 @@ class WebDAN private constructor(
                 else uriPath.replace('/', '\\')
                 val uncFull = "$uncBase$uncSubPath"
 
-                val response = config.directoryGETResponse(uncFull)
+                val response = config.getDirectoryGETResponse(uncFull)
                 if (response != null) {
                     return newFixedLengthResponse(
                         mapStatus(response.requestStatus, response.description),
@@ -969,9 +997,11 @@ class WebDAN private constructor(
             val fileStream = object : FileInputStream(fis.fd) {
                 var totalBytesRead = 0L
                 var lastUpdateTime = 0L
+                var cancelled = false
 
                 override fun read(b: ByteArray, off: Int, len: Int): Int {
-                    if (config.cancelTransfer(target.name)) {
+                    if (config.onTransferCancel(target.name, CancelState.CHECK)) {
+                        cancelled = true
                         throw IOException("Transfer cancelled by user")
                     }
                     val maxToRead = min(len.toLong(), dataToDeliver - totalBytesRead).toInt()
@@ -980,17 +1010,15 @@ class WebDAN private constructor(
                     val bytesRead = bufferedFis.read(b, off, maxToRead)
                     if (bytesRead != -1) {
                         totalBytesRead += bytesRead
-                        if (!isPartial) {
-                            val currentTime = System.currentTimeMillis()
-                            if (currentTime - lastUpdateTime >= 500) {
-                                listener.onTransferProgress(
-                                    target.name,
-                                    totalBytesRead,
-                                    dataToDeliver,
-                                    false
-                                )
-                                lastUpdateTime = currentTime
-                            }
+                        val currentTime = System.currentTimeMillis()
+                        if (currentTime - lastUpdateTime >= 500) {
+                            config.onTransferProgress(
+                                target.name,
+                                startOffset + totalBytesRead,
+                                fileLength,
+                                false
+                            )
+                            lastUpdateTime = currentTime
                         }
                     }
                     return bytesRead
@@ -998,11 +1026,18 @@ class WebDAN private constructor(
 
                 override fun close() {
                     bufferedFis.close()
-                    if (!isPartial) {
-                        DigestAuthManager.resumeTimer(sessionKey) // ← resume idle countdown
-                        listener.onTransferComplete(target.name)
-                    }
+                    if (!isPartial) DigestAuthManager.resumeTimer(sessionKey)
                     super.close()
+
+                    when {
+                        cancelled -> config.onTransferCancel(target.name, CancelState.CANCELLED)
+                        totalBytesRead == dataToDeliver -> config.onTransferComplete(target.name)
+                        isPartial -> config.onTransferComplete(target.name)
+                        else -> config.onTransferError(
+                            target.name,
+                            "Interrupted at $totalBytesRead/$dataToDeliver bytes"
+                        )
+                    }
 
                     if (!isPartial && totalBytesRead < dataToDeliver) {
                         Log.w(
@@ -1036,6 +1071,7 @@ class WebDAN private constructor(
 
         } catch (e: Exception) {
             Log.e(tag, "Read Error: ${e.message}")
+            config.onTransferError(target.name, e.message ?: "Read Error")
             newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Read Error")
         }
     }
@@ -1216,8 +1252,6 @@ class WebDAN private constructor(
 
     private fun moveTempToTarget(tempFile: File, target: File): Boolean {
         if (tempFile.renameTo(target)) return true
-        // Temp file lives in app-private cache, target may be on a different
-        // volume (SD card) — rename() can't cross filesystems, so copy instead.
         return try {
             tempFile.inputStream().use { input ->
                 target.outputStream().use { output -> input.copyTo(output) }
@@ -1229,18 +1263,4 @@ class WebDAN private constructor(
             false
         }
     }
-}
-
-// ─────────────────────────────────────────────────────────────
-//  Transfer listener interface
-// ─────────────────────────────────────────────────────────────
-interface TransferListener {
-    fun onTransferProgress(
-        fileName: String,
-        currentBytes: Long,
-        totalBytes: Long,
-        isDownload: Boolean
-    )
-
-    fun onTransferComplete(fileName: String)
 }

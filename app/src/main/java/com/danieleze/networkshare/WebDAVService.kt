@@ -17,7 +17,6 @@ import java.util.Collections
 import android.os.Build
 import android.app.NotificationChannel
 import android.app.PendingIntent
-import com.danieleze.networkshare.NetworkManager.CHANNEL_ID
 
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -33,7 +32,7 @@ class BootReceiver : BroadcastReceiver() {
     }
 }
 
-class WebDAVService : Service(), TransferListener,
+class WebDAVService : Service(),
     NetworkManager.NetworkEventListener, WebDANConfig {
 
     private var currentSsid: String = ""
@@ -43,38 +42,13 @@ class WebDAVService : Service(), TransferListener,
     private val channelId = "WebDAV_Service_Channel"
     private val tag = "WebDAVService"
     private val safetyChannelId = "WebDAV_Safety_Alerts"
+    private val trustChannelId = "network_trust_channel"
     private val wsDiscoveryService = WSDiscoveryService(
         context = this,
         friendlyName = username.value
     )
+
     // ── NetworkEventListener implementation ──────────────────
-    // NetworkManager calls these when network state changes.
-
-    override fun getAuthInfo(key: String): Any? = when (key) {
-        "username" -> username.value
-        "password" -> password.value
-        "enabled" -> isAuthEnabled.value
-        "token" -> generateToken()
-        else -> null
-    }
-
-    override fun getIpAddress(): String? = NetworkManager.getLocalIpAddress()
-    override fun cancelTransfer(fileName: String) = WebDAVService.cancelTransfer(fileName)
-    override fun showSafetyAlert(fileName: String) = postSafetyAlert(fileName)
-
-    override fun getObjects(uri: String): Any? {
-        if (!isNetworkTrusted.value) {
-            return DavResponse(403, "Forbidden", "text/plain; charset=utf-8", "Network not trusted")
-        }
-        return FileManager.getObjects(uri)
-    }
-
-    override fun directoryGETResponse(uncPath: String): DavResponse? {
-        val templateFile = FileManager.browserInstructionsFile() ?: return null
-        if (!templateFile.exists()) return null
-        val customHtml = templateFile.readText().replace("{{UNC_PATH}}", uncPath)
-        return DavResponse(200, "OK", "text/html; charset=utf-8", customHtml)
-    }
 
     override fun onNetworkTrustChanged(state: NetworkState, ssid: String) {
         val wasTrusted = networkState.value == NetworkState.TRUSTED
@@ -139,6 +113,58 @@ class WebDAVService : Service(), TransferListener,
             startWebDAVServer()
         }, 1500)
     }
+
+    // ── WebDAN server implementation ──────────────────
+
+    override fun authUsername(): String = username.value
+    override fun authPassword() = password.value
+    override fun authSwitch() = isAuthEnabled.value
+    override fun authToken() = generateToken()
+
+    override fun getIpAddress(): String? = NetworkManager.getLocalIpAddress()
+    override fun getObjects(uri: String): Any? {
+        if (!isNetworkTrusted.value) {
+            return DavResponse(403, "Forbidden", "text/plain; charset=utf-8", "Network not trusted")
+        }
+        return FileManager.getObjects(uri)
+    }
+
+    override fun getDirectoryGETResponse(uncPath: String): DavResponse? {
+        val templateFile = FileManager.browserInstructionsFile() ?: return null
+        if (!templateFile.exists()) return null
+        val customHtml = templateFile.readText().replace("{{UNC_PATH}}", uncPath)
+        return DavResponse(200, "OK", "text/html; charset=utf-8", customHtml)
+    }
+
+    override fun onTransferProgress(
+        fileName: String,
+        currentBytes: Long,
+        totalBytes: Long,
+        isReceiving: Boolean
+    ) = showProgressNotification(fileName, currentBytes, totalBytes, isReceiving)
+
+    override fun onTransferComplete(fileName: String) {
+        clearCancel(fileName)
+        dismissProgress(fileName)
+    }
+
+    override fun onTransferError(fileName: String, message: String) {
+        clearCancel(fileName)
+        dismissProgress(fileName)
+        showTransferFailedToast(fileName, message)
+    }
+
+    override fun onTransferCancel(fileName: String, state: CancelState): Boolean {
+        return when (state) {
+            CancelState.CHECK -> isCancelRequested(fileName)
+            CancelState.CANCELLED -> {
+                dismissProgress(fileName)
+                false
+            }
+        }
+    }
+
+    override fun onTransferBlocked(fileName: String) = showSafetyAlert(fileName)
 
     // ── Service lifecycle ─────────────────────────────────────
 
@@ -285,7 +311,7 @@ class WebDAVService : Service(), TransferListener,
             return
         }
 
-        val server = WebDAN.startServer(this, this, this)
+        val server = WebDAN.startServer(this, this)
         if (server != null) {
             activeServers.add(server)
             wsDiscoveryService.webdavAddress = friendlyServerAddress
@@ -453,7 +479,7 @@ class WebDAVService : Service(), TransferListener,
 
     fun ensureChannel(manager: NotificationManager?) {
         val channel = NotificationChannel(
-            CHANNEL_ID,
+            trustChannelId,
             "Network Trust Alerts",
             NotificationManager.IMPORTANCE_HIGH
         ).apply {
@@ -463,100 +489,6 @@ class WebDAVService : Service(), TransferListener,
             enableLights(true)
         }
         manager?.createNotificationChannel(channel)
-    }
-
-    private fun showMultipleNetworksWarning() {
-        android.os.Handler(android.os.Looper.getMainLooper()).post {
-            android.widget.Toast.makeText(
-                this,
-                "You're connected to multiple networks. For a secure, reliable share, connect to only one at a time.",
-                android.widget.Toast.LENGTH_LONG
-            ).show()
-        }
-    }
-
-    fun postSafetyAlert(fileName: String) {
-        android.os.Handler(android.os.Looper.getMainLooper()).post {
-            android.widget.Toast.makeText(
-                this,
-                "Safety Lock Active: $fileName. Please wait for 60 seconds",
-                android.widget.Toast.LENGTH_LONG
-            ).show()
-        }
-
-        val intent = Intent(this, MainActivity::class.java).apply {
-            setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        }
-        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
-
-        val builder = NotificationCompat.Builder(this, safetyChannelId)
-            .setSmallIcon(android.R.drawable.stat_sys_warning)
-            .setContentTitle("File Safety Lock Active")
-            .setContentText("A recent transfer of '$fileName' failed. Please wait for up to a minute before interacting with again.")
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setColor("#2BAED5".toColorInt())
-            .setAutoCancel(true)
-            .setTimeoutAfter(25000)
-            .setContentIntent(pendingIntent)
-
-        val manager = getSystemService(NotificationManager::class.java)
-        manager?.notify(fileName.hashCode(), builder.build())
-    }
-
-    // ── Transfer listener ─────────────────────────────────────
-
-    override fun onTransferProgress(
-        fileName: String,
-        currentBytes: Long,
-        totalBytes: Long,
-        isDownload: Boolean
-    ) {
-        val notificationId = fileName.hashCode()
-        val manager = getSystemService(NotificationManager::class.java)
-
-        val cancelIntent = Intent(this, TransferCancelReceiver::class.java).apply {
-            putExtra("file_name", fileName)
-        }
-        val pendingCancel = PendingIntent.getBroadcast(
-            this, notificationId, cancelIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val percent = if (totalBytes > 0L) ((currentBytes * 100L) / totalBytes).toInt() else 0
-
-        val builder = NotificationCompat.Builder(this, channelId)
-            .setSmallIcon(if (isDownload) android.R.drawable.stat_sys_download else android.R.drawable.stat_sys_upload)
-            .setContentTitle(if (isDownload) "Downloading $fileName" else "Uploading $fileName")
-            .setColor("#2BAED5".toColorInt())
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setProgress(100, percent, false)
-            .setContentText("${formatSize(currentBytes)} / ${formatSize(totalBytes)}")
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "CANCEL", pendingCancel)
-
-        manager?.notify(notificationId, builder.build())
-    }
-
-    override fun onTransferComplete(fileName: String) {
-        val manager = getSystemService(NotificationManager::class.java)
-        manager?.cancel(fileName.hashCode())
-    }
-
-    // ── Utilities ─────────────────────────────────────────────
-
-    @SuppressLint("DefaultLocale")
-    fun formatSize(bytes: Long): String {
-        if (bytes <= 0) return "0 B"
-        val units = arrayOf("B", "KB", "MB", "GB", "TB")
-        var size = bytes.toDouble()
-        var unitIndex = 0
-        while (size >= 1024 && unitIndex < units.size - 1) {
-            size /= 1024
-            unitIndex++
-        }
-        return String.format("%.2f %s", size, units[unitIndex])
     }
 
     private fun createNotificationChannel() {
@@ -579,6 +511,108 @@ class WebDAVService : Service(), TransferListener,
             vibrationPattern = longArrayOf(0, 250, 250, 250)
         }
         manager?.createNotificationChannel(safetyChannel)
+    }
+
+    private fun dismissProgress(fileName: String) {
+        getSystemService(NotificationManager::class.java)?.cancel(fileName.hashCode())
+    }
+
+    private fun showMultipleNetworksWarning() {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            android.widget.Toast.makeText(
+                this,
+                "You're connected to multiple networks. For a secure, reliable share, connect to only one at a time.",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    private fun showTransferFailedToast(fileName: String, message: String) {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            android.widget.Toast.makeText(
+                this,
+                "Transfer failed: $fileName ($message)",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    fun showSafetyAlert(fileName: String) {
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            android.widget.Toast.makeText(
+                this,
+                "Safety Lock Active: $fileName. Please wait for 25 seconds",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+        }
+
+        val intent = Intent(this, MainActivity::class.java).apply {
+            setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        }
+        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
+
+        val builder = NotificationCompat.Builder(this, safetyChannelId)
+            .setSmallIcon(android.R.drawable.stat_sys_warning)
+            .setContentTitle("File Safety Lock Active")
+            .setContentText("A recent transfer of '$fileName' failed. Please wait for up to 25 seconds before trying to delete.")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setColor("#2BAED5".toColorInt())
+            .setOngoing(true)
+            .setAutoCancel(false)
+            .setTimeoutAfter(25000)
+            .setContentIntent(pendingIntent)
+
+        val manager = getSystemService(NotificationManager::class.java)
+        manager?.notify("safety_$fileName".hashCode(), builder.build())
+    }
+
+    private fun showProgressNotification(
+        fileName: String,
+        currentBytes: Long,
+        totalBytes: Long,
+        isReceiving: Boolean
+    ) {
+        val notificationId = fileName.hashCode()
+        val manager = getSystemService(NotificationManager::class.java)
+
+        val cancelIntent = Intent(this, TransferCancelReceiver::class.java).apply {
+            putExtra("file_name", fileName)
+        }
+        val pendingCancel = PendingIntent.getBroadcast(
+            this, notificationId, cancelIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val percent = if (totalBytes > 0L) ((currentBytes * 100L) / totalBytes).toInt() else 0
+
+        val builder = NotificationCompat.Builder(this, channelId)
+            .setSmallIcon(if (isReceiving) android.R.drawable.stat_sys_download else android.R.drawable.stat_sys_upload)
+            .setContentTitle(if (isReceiving) "Downloading $fileName" else "Uploading $fileName")
+            .setColor("#2BAED5".toColorInt())
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setProgress(100, percent, false)
+            .setContentText("${formatSize(currentBytes)} / ${formatSize(totalBytes)}")
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "CANCEL", pendingCancel)
+
+        manager?.notify(notificationId, builder.build())
+    }
+
+    // ── Utilities ─────────────────────────────────────────────
+
+    @SuppressLint("DefaultLocale")
+    fun formatSize(bytes: Long): String {
+        if (bytes <= 0) return "0 B"
+        val units = arrayOf("B", "KB", "MB", "GB", "TB")
+        var size = bytes.toDouble()
+        var unitIndex = 0
+        while (size >= 1024 && unitIndex < units.size - 1) {
+            size /= 1024
+            unitIndex++
+        }
+        return String.format("%.2f %s", size, units[unitIndex])
     }
 
     // ── Companion ─────────────────────────────────────────────
@@ -627,8 +661,12 @@ class WebDAVService : Service(), TransferListener,
             cancelledFiles.add(fileName)
         }
 
-        fun cancelTransfer(fileName: String): Boolean {
+        fun isCancelRequested(fileName: String): Boolean {
             return cancelledFiles.remove(fileName)
+        }
+
+        fun clearCancel(fileName: String) {
+            cancelledFiles.remove(fileName)
         }
 
         fun generateToken(): String {

@@ -22,7 +22,6 @@ object NetworkManager {
     private const val KEY_BLOCKED = "blocked_networks"
     private const val TAG = "NetworkManager"
 
-    const val CHANNEL_ID = "network_trust_channel"
     const val EXTRA_SSID = "extra_ssid"
     const val ACTION_ALLOW = "com.danieleze.networkshare.NETWORK_ALLOW"
     const val ACTION_ALLOW_ONCE = "com.danieleze.networkshare.NETWORK_ALLOW_ONCE"
