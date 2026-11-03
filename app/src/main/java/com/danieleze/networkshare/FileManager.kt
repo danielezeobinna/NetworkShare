@@ -1,12 +1,10 @@
 package com.danieleze.networkshare
 
-import android.content.Context
-import android.content.Intent
-import android.os.Build
-import android.os.Environment
+import android.content.*
+import android.os.*
 import android.os.storage.StorageManager
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.*
+import io.github.webdanlib.webdav.server.DavResponse
 import java.io.File
 
 data class FolderItem(
@@ -110,19 +108,19 @@ object FileManager {
         knownSystemDirTypes.zip(contents)
             .associate { (type, content) -> Environment.getExternalStoragePublicDirectory(type).name to content }
     }
-    private var mediaReceiver: android.content.BroadcastReceiver? = null
+    private var mediaReceiver: BroadcastReceiver? = null
 
     fun registerMediaReceiver(context: Context) {
         appContext = context.applicationContext
         if (mediaReceiver != null) return
 
-        mediaReceiver = object : android.content.BroadcastReceiver() {
+        mediaReceiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context, intent: Intent) {
                 refreshStorageRoots(context.applicationContext)
             }
         }
 
-        val filter = android.content.IntentFilter().apply {
+        val filter = IntentFilter().apply {
             addAction(Intent.ACTION_MEDIA_MOUNTED)
             addAction(Intent.ACTION_MEDIA_UNMOUNTED)
             addAction(Intent.ACTION_MEDIA_EJECT)
@@ -314,7 +312,7 @@ object FileManager {
                             hasSubFolders = it.listFiles()?.any { sub -> sub.isDirectory } ?: false
                         )
                     } ?: emptyList()
-                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                Handler(Looper.getMainLooper()).post {
                     scannedItems.clear()
                     scannedItems.addAll(items)
                     isScanning.value = false

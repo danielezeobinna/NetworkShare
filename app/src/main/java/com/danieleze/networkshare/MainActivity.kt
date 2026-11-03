@@ -1,61 +1,34 @@
 package com.danieleze.networkshare
 
 import android.app.Activity
-import android.content.Intent
-import android.os.Bundle
 import android.util.Log
 import android.Manifest
-import android.content.BroadcastReceiver
-import android.content.Context
-import android.content.IntentFilter
-import android.os.Build
-import android.os.Environment
+import android.content.*
+import android.os.*
 import android.provider.Settings
 import android.widget.Toast
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.biometric.BiometricManager
-import androidx.biometric.BiometricPrompt
-import androidx.core.content.ContextCompat
-import androidx.core.net.toUri
-import com.google.android.gms.ads.FullScreenContentCallback
-import com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
-import androidx.activity.viewModels
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
+import androidx.activity.*
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.biometric.*
+import androidx.compose.animation.*
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.*
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import androidx.core.graphics.toColorInt
+import androidx.core.net.toUri
 import androidx.core.view.WindowCompat
 import com.danieleze.networkshare.ViewModel.Companion.isUnlocked
-import com.danieleze.networkshare.ui.theme.AppTheme
-import com.danieleze.networkshare.ui.theme.NetworkShareTheme
-import com.danieleze.networkshare.ui.screens.DiscoveryScreen
-import com.danieleze.networkshare.ui.screens.BiometricGateScreen
-import com.danieleze.networkshare.ui.screens.FilePickerSection
-import com.danieleze.networkshare.ui.screens.NetworkListScreen
-import com.danieleze.networkshare.ui.screens.LocationOffDialog
-import com.danieleze.networkshare.ui.screens.UnknownNetworkDialog
-import com.danieleze.networkshare.ui.screens.NotificationPermissionDialog
-import com.danieleze.networkshare.ui.screens.NoNetworkDialog
-import com.danieleze.networkshare.ui.screens.UserGuideScreen
-import com.google.android.gms.ads.AdListener
-import com.google.android.gms.ads.AdRequest
-import com.google.android.gms.ads.AdSize
-import com.google.android.gms.ads.AdView
-import com.google.android.gms.ads.LoadAdError
-import com.google.android.gms.ads.MobileAds
-import com.google.android.gms.ads.interstitial.InterstitialAd
+import com.danieleze.networkshare.ui.theme.*
+import com.danieleze.networkshare.ui.screens.*
+import com.google.android.gms.ads.*
+import com.google.android.gms.ads.interstitial.*
 import java.io.File
 
 class MainActivity : androidx.fragment.app.FragmentActivity() {
@@ -73,7 +46,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     private var interstitialAd: InterstitialAd? = null
 
     // ── Permission heartbeat ──────────────────────
-    private val permHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val permHandler = Handler(Looper.getMainLooper())
     private var isHeartbeatActive = false
 
     private val heartbeat = object : Runnable {
@@ -812,7 +785,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
                     }
 
                     override fun onAdFailedToShowFullScreenContent(
-                        error: com.google.android.gms.ads.AdError
+                        error: AdError
                     ) {
                         interstitialAd = null; loadInterstitialAd()
                     }
@@ -838,7 +811,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 
     private fun refreshServiceIfRunning() {
         if (!viewModel.isDiscoveryOn) return
-        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+        Handler(Looper.getMainLooper()).postDelayed({
             startService(Intent(this, WebDAVService::class.java).apply { action = "REFRESH_INFO" })
         }, 1500)
     }

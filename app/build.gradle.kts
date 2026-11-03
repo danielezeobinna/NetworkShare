@@ -64,16 +64,21 @@ kotlin {
 dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
+    //noinspection UseTomlInstead,GradleDependency
     implementation("androidx.activity:activity-compose:1.9.0")
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+    //noinspection UseTomlInstead,GradleDependency
     implementation("androidx.fragment:fragment-ktx:1.8.5")
+    //noinspection UseTomlInstead,GradleDependency
     implementation("androidx.core:core-ktx:1.17.0")
-    implementation("org.nanohttpd:nanohttpd:2.3.1")
+    //noinspection UseTomlInstead
+    implementation("io.github.webdanlib:webdav:0.9.0-SNAPSHOT")
     implementation(libs.androidx.compose.foundation)
+    //noinspection UseTomlInstead
     implementation("androidx.biometric:biometric:1.2.0-alpha05")
     implementation(libs.androidx.compose.ui.geometry)
     implementation(libs.androidx.foundation)
@@ -81,10 +86,13 @@ dependencies {
     implementation(libs.androidx.compose.ui.text)
     implementation(libs.foundation)
     implementation(libs.androidx.ui)
+    //noinspection UseTomlInstead
     implementation("com.jaredrummler:android-device-names:2.1.1")
+    //noinspection UseTomlInstead,GradleDependency
     implementation("com.google.android.gms:play-services-ads:23.6.0")
     implementation(libs.androidx.compose.foundation.foundation2)
     testImplementation(libs.junit)
+    //noinspection UseTomlInstead,GradleDependency
     implementation("androidx.browser:browser:1.8.0")
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

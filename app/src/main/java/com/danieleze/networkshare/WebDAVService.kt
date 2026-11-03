@@ -1,22 +1,17 @@
 package com.danieleze.networkshare
 
+import android.annotation.SuppressLint
 import android.app.*
-import android.content.Context
-import android.content.Intent
-import android.os.IBinder
-import android.content.BroadcastReceiver
+import android.content.*
+import android.os.*
 import android.util.Log
 import androidx.compose.runtime.mutableStateOf
-import androidx.core.graphics.toColorInt
 import androidx.core.app.NotificationCompat
-import java.io.File
 import androidx.core.content.edit
-import android.annotation.SuppressLint
-import android.app.NotificationManager
+import androidx.core.graphics.toColorInt
+import io.github.webdanlib.webdav.server.*
+import java.io.File
 import java.util.Collections
-import android.os.Build
-import android.app.NotificationChannel
-import android.app.PendingIntent
 
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -33,10 +28,10 @@ class BootReceiver : BroadcastReceiver() {
 }
 
 class WebDAVService : Service(),
-    NetworkManager.NetworkEventListener, WebDANConfig {
+    NetworkManager.NetworkEventListener, Config {
 
     private var currentSsid: String = ""
-    private var wakeLock: android.os.PowerManager.WakeLock? = null
+    private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
     private var wifiJustEnabled = false
     private val channelId = "WebDAV_Service_Channel"
@@ -96,7 +91,7 @@ class WebDAVService : Service(),
     }
 
     override fun onHotspotEnabled() {
-        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+        Handler(Looper.getMainLooper()).postDelayed({
             startWebDAVServer()
         }, 1500)
         if (isWaitingForHotspot) {
@@ -109,7 +104,7 @@ class WebDAVService : Service(),
 
     override fun onWifiEnabled() {
         wifiJustEnabled = true
-        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+        Handler(Looper.getMainLooper()).postDelayed({
             startWebDAVServer()
         }, 1500)
     }
@@ -205,9 +200,9 @@ class WebDAVService : Service(),
 
         // Acquire CPU wake lock
         if (wakeLock == null) {
-            val pm = getSystemService(POWER_SERVICE) as android.os.PowerManager
+            val pm = getSystemService(POWER_SERVICE) as PowerManager
             wakeLock = pm.newWakeLock(
-                android.os.PowerManager.PARTIAL_WAKE_LOCK,
+                PowerManager.PARTIAL_WAKE_LOCK,
                 "NetworkShare::WebDAVWakeLock"
             ).also {
                 it.setReferenceCounted(false)
@@ -311,7 +306,7 @@ class WebDAVService : Service(),
             return
         }
 
-        val server = WebDAN.startServer(this, this)
+        val server = startServer(this, this)
         if (server != null) {
             activeServers.add(server)
             wsDiscoveryService.webdavAddress = friendlyServerAddress
@@ -518,7 +513,7 @@ class WebDAVService : Service(),
     }
 
     private fun showMultipleNetworksWarning() {
-        android.os.Handler(android.os.Looper.getMainLooper()).post {
+        Handler(Looper.getMainLooper()).post {
             android.widget.Toast.makeText(
                 this,
                 "You're connected to multiple networks. For a secure, reliable share, connect to only one at a time.",
@@ -528,7 +523,7 @@ class WebDAVService : Service(),
     }
 
     private fun showTransferFailedToast(fileName: String, message: String) {
-        android.os.Handler(android.os.Looper.getMainLooper()).post {
+        Handler(Looper.getMainLooper()).post {
             android.widget.Toast.makeText(
                 this,
                 "Transfer failed: $fileName ($message)",
@@ -538,7 +533,7 @@ class WebDAVService : Service(),
     }
 
     fun showSafetyAlert(fileName: String) {
-        android.os.Handler(android.os.Looper.getMainLooper()).post {
+        Handler(Looper.getMainLooper()).post {
             android.widget.Toast.makeText(
                 this,
                 "Safety Lock Active: $fileName. Please wait for 25 seconds",
@@ -627,7 +622,7 @@ class WebDAVService : Service(),
         var username = mutableStateOf(sanitizeHostnameSegment(Build.MODEL))
         var password = mutableStateOf("pass")
         var useFallbackAddress = mutableStateOf(false)
-        val activeServers = mutableListOf<WebDAN>()
+        val activeServers = mutableListOf<Server>()
 
         private fun sanitizeHostnameSegment(raw: String): String {
             return raw
